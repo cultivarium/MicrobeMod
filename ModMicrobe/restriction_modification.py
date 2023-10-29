@@ -11,26 +11,41 @@ from Bio.SeqUtils import nt_search
 from Bio.Seq import Seq
 from pathlib import Path
 
-### Run HMMs
-def run_hmmer(output_prefix, input_fasta, threads):
-	cmd = 'hmmsearch --cpu {} --domtblout {}.hits RM_HMMs_From_DefenseFinder.hmm {}'
-
-	cmd = cmd.format(threads, output_prefix, input_fasta)
-
+def run_prodigal(output_prefix, input_fasta):
+	cmd = 'prodigal -i {} -a {}.faa'
+	cmd = cmd.format(input_fasta, output_prefix)
+	
 	if os.path.isfile(input_fasta):
-		print("Running HMMER:")
-		print(cmd)
+		print("Running prodigal: {}".format(cmd))
+
+		subprocess.run(cmd, stdout=subprocess.DEVNULL,
+				stderr=subprocess.STDOUT, shell=True)
+	
+		return output_prefix + ".faa"
+
+	else:
+		print("ERROR: FASTA file doesn't exist")
+
+def run_hmmer(output_prefix, prodigal_fasta, threads):
+	cmd = 'hmmsearch --cut_ga --cpu {} --domtblout {}.hits {} {}'
+
+	rm_hmm_file = os.path.dirname(os.path.realpath(__file__)).rstrip("/")  + "/HMMs/RM_HMMs.hmm"
+
+	cmd = cmd.format(threads, output_prefix, rm_hmm_file, prodigal_fasta)
+
+	if os.path.isfile(prodigal_fasta):
+		print("Running HMMER: " + cmd)
 		subprocess.run(cmd, stdout=subprocess.DEVNULL,
 					stderr=subprocess.STDOUT, shell=True)
 		return "{}.hits".format(output_prefix)
 	else:
-		print("ERROR: FASTA file doesn't exist")
+		print("ERROR: Prodigal output file not found")
 
-def extract_genes(hits, input_fasta, output_prefix):
-	rm_gene_file = output_prefix + "_RM_genes.faa"
+def extract_genes(hits, prodigal_fasta, output_prefix):
+	rm_gene_file = output_prefix + ".rm.genes.faa"
 	f = open(rm_gene_file, 'w+')
 
-	for record in SeqIO.parse(input_fasta, 'fasta'):
+	for record in SeqIO.parse(prodigal_fasta, 'fasta'):
 		if record.id in hits:
 			f.write(">" + record.description + "\n")
 			f.write(str(record.seq) + "\n")
@@ -42,102 +57,178 @@ def resolve_hits(hmmer_output, output_prefix):
 	cmd = "cath-resolve-hits --input-format hmmer_domtblout {} --hits-text-to-file {}.resolved.hits"
 
 	cmd = cmd.format(hmmer_output, output_prefix)
-	print("Running cath:")
-	print(cmd)
+	print("Running cath: " + cmd)
 	subprocess.run(cmd, stdout=subprocess.DEVNULL,
 				stderr=subprocess.STDOUT, shell=True)
 	return "{}.resolved.hits".format(output_prefix)
 
 
 def parse_hmmer(resolved_hits):
+
+	offtarget_file = os.path.dirname(os.path.realpath(__file__)).rstrip("/")  + "/HMMs/off_target.txt"
+	offtarget = []
+	f = open(offtarget_file)
+	for line in f.readlines():
+		offtarget.append(line.strip())
+	f.close()
+
 	f = open(resolved_hits)
 	hits = defaultdict(list)
 	locations = {}
+	evalues = defaultdict(dict)
 	for line in f.readlines():
 		if not line.startswith("#"):
 			gene = line.split()[0]
 			hmm = line.split()[1]
-			hits[gene].append(hmm)
 			contig = "_".join(gene.split("_")[:-1])
 			gene_num = int(gene.split("_")[-1])
-			locations[gene] = (contig, gene_num)
+			evalue = float(line.split()[-1])
+
+			if hmm not in offtarget:
+				hits[gene].append(hmm)
+				evalues[gene][hmm] = evalue
+				locations[gene] = (contig, gene_num)
 	f.close()
-	return hits, locations
+	return hits, locations, evalues
 
-def find_operons(hits, gene_locations, system_types, gene_window = 10):
-	links = defaultdict(list)
+def create_gene_table(hits, gene_locations, system_types, evalues, blast_hits, gene_window = 10):
+	gene_table = []
 
 	for hit in hits:
-		### Get types for this gene
-		# hit_types = []
-		# for hmm in hits[hit]:
-		# 	hit_types.append()
 
-		### Find any close genes
-		for hit2 in hits:
-			if hit != hit2:
-				if gene_locations[hit][0] == gene_locations[hit2][0]: # same contig
-					if abs(gene_locations[hit][1] - gene_locations[hit2][1]) <= gene_window: # Within 10 genes
-						## Found match: get the types of this gene
-						links[hit].append(hit2)
+		## Get BLAST info
+		best_blast=blast_pid=meth_type=motif = ''
+		if hit in blast_hits:
+			best_blast = blast_hits[hit][0]
+			blast_pid = blast_hits[hit][1]
+			meth_type = blast_hits[hit][2]
+			motif = blast_hits[hit][3]
 
-	print(links)		
+		gene_types = set() # So that each HMM MT/RE hit only counts once per gene
 
-	## Now define operons
-	ME_operons = []
+		for hmm in hits[hit]:
+			## Get the system type of this HMM
+			if system_types[hmm][0] not in gene_types:
+				gene_types.add(system_types[hmm][0])
+				gene_table.append({
+					"Gene": hit,
+					"Contig": "_".join(hit.split("_")[:-1]),
+					"Gene Position": int(hit.split("_")[-1]),
+					"System Type": system_types[hmm][1],
+					"Gene type": system_types[hmm][0],
+					"HMM": hmm,
+					"Evalue": evalues[hit][hmm],
+					"REBASE homolog": best_blast,
+					"Homolog identity(%)": blast_pid,
+					"Homolog methylation": meth_type,
+					"Homolog motif": motif
+					})
+			
+	gene_table = pd.DataFrame(gene_table)
+	gene_table = gene_table.sort_values(["Contig","Gene Position"], ascending=True)
 
-	## For each RE
-	for hit in hits:
-		gene_types = [system_types[hmm][0] for hmm in hits[hit]]
-		
-		## Is it both RE and ME? if so, done
-		if 'RE' in gene_types and 'MT' in gene_types:
-			ME_operons.append({"RE": hit, "MT": hit})
-			continue
+	## Assign operons
+	gene2operon = {}
+	operon2gene = defaultdict(list)
+	operon_number = 0
+	pos = 0
+	contig = ''
 
-		## Is it a singleton? if so, done
-		if len(links[hit]) == 0:
-			if 'IIG' in gene_types:
-				ME_operons.append({"RE":hit,"MT":hit})
-			if 'RE' in gene_types:
-				ME_operons.append({"RE":hit, "MT":""})
-			if 'MT' in gene_types:
-				ME_operons.append({"RE":"","MT":hit})
-			continue
+	for index, row in gene_table.iterrows():	
+		## New contig = new operon
+		if row['Contig'] != contig:
+			operon_number += 1
+			contig = row['Contig']
+			pos = row['Gene Position']
+			gene2operon[row['Gene']] = operon_number
+			operon2gene[operon_number].append(row['System Type'] + ":" +row['Gene type'])
 
-		# Does it have any links? 
+		# Same contig, gene within window = same operon
+		# Update position (extend operons)
+		elif row['Contig'] == contig and row['Gene Position'] <= pos + gene_window:
+			pos = row['Gene Position']
+			gene2operon[row['Gene']] = operon_number
+			operon2gene[operon_number].append(row['System Type'] + ":" +row['Gene type'])			
 
-		if len(links[hit]) > 0:
+		# Same contig, gene outside of window = new operon
+		else:
+			operon_number += 1
+			contig = row['Contig']
+			pos = row['Gene Position']
+			gene2operon[row['Gene']] = operon_number
+			operon2gene[operon_number].append(row['System Type'] + ":" +row['Gene type'])			
 
-			# If it is an ME, does it have any RE links?
-			if 'MT' in gene_types: 
-				REs = ''
-				for hit2 in links[hit]:
-					gene_types2 = [system_types[hmm][0] for hmm in hits[hit2]]
-					if 'RE' in gene_types2:
-						if REs == '':
-							REs = hit2
-						else:
-							REs = REs + "," + hit2
-				ME_operons.append({"RE":REs,"MT":hit})
 
-			# If it is an RE, and just has RE links, then it is a singleton
-			elif 'RE' in gene_types:
-				REs = hit
-				for hit2 in links[hit]:
-					gene_types2 = [system_types[hmm][0] for hmm in hits[hit2]]
-					if 'RE' in gene_types2:
-							REs = REs + "," + hit2
-				ME_operons.append({"RE":REs,"MT":""})
+	## Only operons with 1 MT, 1 RE are kept - others are singletons
+	## Keep Type IVs
 
-	## Create final operon table
-	operon_table = pd.DataFrame(ME_operons)
-	return operon_table
+	operon_number = 0
+	singleton_number = 0
+	operon_labels = {}
 
-def assign_systems_and_filter(operon_table, system_types):
-	##
+	for index, row in gene_table.iterrows():
+		found_MT = False
+		found_RE = False
+		found_RE_IV = False 
+		operon = gene2operon[row['Gene']]
 
-	pass
+		if operon not in operon_labels:
+			for genetype in operon2gene[operon]:
+				if 'MT' in genetype:
+					found_MT = True
+				if 'RE' in genetype:
+					found_RE = True
+				if 'RM_Type_IV' in genetype or 'IIG' in genetype:
+					found_RE_IV = True
+
+			if found_RE_IV or (found_MT and found_RE):
+				operon_number += 1
+				operon_labels[operon] = "RM Operon #" + str(operon_number)
+			else:
+				singleton_number += 1
+				operon_labels[operon] = "Singleton #" + str(singleton_number)
+
+	gene_table.insert(0,'Operon', gene_table['Gene'].map(gene2operon).map(operon_labels))
+	gene_table = gene_table.sort_values(["Operon","REBASE homolog", "Gene Position"])
+	del gene_table['Gene Position']
+	del gene_table['Contig']
+
+	return gene_table
+
+def run_rebase_blast(rm_gene_file, output_prefix, threads):
+
+	cmd = 'blastp -query {} -db {} -outfmt 6 -evalue 1e-5 -num_threads {} > {}.blast'
+
+	blast_db_file = os.path.dirname(os.path.realpath(__file__)).rstrip("/") + "/rebase_blast/all_rebase_proteins.faa"
+
+	cmd = cmd.format(rm_gene_file, blast_db_file, threads, output_prefix)
+
+	print("Running BLASTP against REBASE: " + cmd)
+	subprocess.run(cmd, stdout=subprocess.DEVNULL,
+				stderr=subprocess.STDOUT, shell=True)
+
+	return "{}.blast".format(output_prefix)
+
+def read_blast(blast_file):
+	f = open(blast_file)
+	blast_hits = {}
+	prots = set()
+
+	for line in f.readlines():
+		hit = line.split()[0]
+		pid = float(line.split()[2])
+
+		if hit not in prots: # top hit only
+			prots.add(hit)
+			if pid > 50:
+				best_hit = line.split("\t")[1].split(":")[1].split("-")[0]
+				meth_type = line.split("\t")[1].split('-')[-2]
+				motif = line.split("\t")[1].split("-")[-1]
+
+				blast_hits[hit] = (best_hit, pid, meth_type, motif)
+
+	return blast_hits
+
 
 def main(fasta, output_prefix, threads):
 
@@ -148,15 +239,19 @@ def main(fasta, output_prefix, threads):
 	for index, row in metadata.iterrows():
 		system_types[row['Name']] = (row['Enzyme_type'], row['System'])
 
-	
-	hmmer_output = run_hmmer(output_prefix, fasta, threads)
-	resolved_hits = resolve_hits(hmmer_output, output_prefix)
-	gene_hits, gene_locations = parse_hmmer(resolved_hits)
+	prodigal_fasta = run_prodigal(output_prefix, fasta)
+	hmmer_output = run_hmmer(output_prefix, prodigal_fasta, threads)
 
-	rm_gene_file = extract_genes(gene_hits, fasta, output_prefix)
-	operon_table = find_operons(gene_hits, gene_locations, system_types)
-	operon_table.to_csv(output_prefix + ".all.tsv", sep="\t", index=False)
-	operon_table[(operon_table.RE != '') & (operon_table.MT != '') ].to_csv(output_prefix + ".operon.tsv", sep="\t", index=False)
+	resolved_hits = resolve_hits(hmmer_output, output_prefix)
+	gene_hits, gene_locations, evalues = parse_hmmer(resolved_hits)
+
+	rm_gene_file = extract_genes(gene_hits, prodigal_fasta, output_prefix)
+
+	blast_file = run_rebase_blast(rm_gene_file, output_prefix, threads)
+	blast_hits = read_blast(blast_file)
+
+	gene_table = create_gene_table(gene_hits, gene_locations, system_types, evalues, blast_hits)
+	gene_table.to_csv(output_prefix + "_RM_genes.tsv", sep="\t", index=False)
 
 if __name__ == '__main__':
 
