@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+
+###############################################################################
+#
+# MicrobeMod - main program entry point
+#
+###############################################################################
+
+__author__ = "Alex Crits-Christoph"
+__license__ = "MIT"
+__email__ = "alex@cultivarium.org"
+__status__ = "Development"
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import MicrobeMod.microbemod as microbemod
+import MicrobeMod.restriction_modification as restriction_modification
+
+
+
+if __name__ == '__main__':
+    # create the top-level parser
+    parser = argparse.ArgumentParser(prog='MicrobeMod')
+
+    # create sub-parser
+    sub_parsers = parser.add_subparsers(help='Workflow options (choose one of the two):', dest="subparser")
+
+    # create the parser for the "call methylation" sub-command
+    parser_mod = sub_parsers.add_parser('call_methylation', help='Identify 5mC and 6mA sites and methylation motifs in a genome with Nanopore R10.4.1 data.')
+    
+    parser_mod.add_argument("-b", "--bam_file", action="store", default=None, required=True, \
+        help='BAM file of nanopore reads mapped to reference genome with the MM and ML tags preserved.')
+
+    parser_mod.add_argument("-r", "--reference_fasta", action="store", default=None, required=True, \
+        help='Reference genome FASTA file.')
+    parser_mod.add_argument("-m", "--methylation_types", action="store", default="6mA,5mC", required=False, \
+        help='Methylation types to profile')
+    parser_mod.add_argument("-o", "--output_prefix", action="store", default=None, required=False, \
+        help='Output prefix. Default is based on the BAM filename.')
+    parser_mod.add_argument("-s", "--streme_path", action="store", default='streme', required=False, \
+        help='Path to streme executable.')
+
+    parser_mod.add_argument("--min_coverage", action="store", default=20, required=False, type=int, \
+        help='Minimum coverage required to call a site as methylated.')
+    parser_mod.add_argument("--methylation_confidence_threshold", action="store", default=0.66, required=False, type=float, \
+        help='The minimum confidence score to call a base on a read as methylated. Passed to modkit. Default: 0.66')    
+    parser_mod.add_argument("--percent_methylation_cutoff", action="store", default=0.66, required=False, type=float, \
+        help='The fraction of methylated reads mapping to a site to count that site as methylated. Default: 0.66')
+    parser_mod.add_argument("--percent_cutoff_streme", action="store", default=0.9, required=False, type=float, \
+        help='The fraction of methylated reads mapping to a site to pass that site to motif calling. Default: 0.9')
+
+
+    parser_mod.add_argument("-t", "--threads", action="store", default=12, \
+        help='Number of threads to use. Only the first step (modkit) is multithreaded.')
+
+    # create the parser for the "annotate RM" sub-command
+    parser_rm = sub_parsers.add_parser('annotate_rm', help='Annotate the restriction-modification genes and operons in any genome.')
+
+    parser_rm.add_argument("-f", "--fasta", action="store", default=None, required=True, \
+        help='Prodigal FAA amino acid file (prodigal -a) for a genome.')
+    parser_rm.add_argument("-o", "--output_prefix", action="store", default=None, required=False, \
+        help='Output prefix.')
+    parser_rm.add_argument("-t", "--threads", action="store", default=12, \
+        help='Number of threads to use.')
+
+
+    args = parser.parse_args()
+
+    if args.subparser == 'call_methylation':
+        microbemod.main(args.bam_file, args.reference_fasta, args.methylation_types, args.output_prefix, args.threads, args.streme_path, 
+            args.min_coverage, args.percent_methylation_cutoff, args.percent_cutoff_streme, args.methylation_confidence_threshold)
+
+    elif args.subparser == 'annotate_rm':    
+        if not args.output_prefix:
+            args.output_prefix = args.fasta.split("/")[-1].split(".")[0]
+        restriction_modification.main(args.fasta, args.output_prefix, args.threads)
+
+    else:
+    	parser.print_help()
