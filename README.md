@@ -7,7 +7,7 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 Before installation, make sure the following external dependencies are available in your path. 
 
 ### Dependencies for `MicrobeMod annotate_rm`
-1. **Prodigal** and **HMMER**: `conda install -c bioconda prodigal hmmer`
+1. **Prodigal**, **BLAST**, and **HMMER**: `conda install -c bioconda prodigal hmmer blast`
 
 2. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
 
