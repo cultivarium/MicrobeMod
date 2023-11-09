@@ -12,6 +12,15 @@ from Bio.Seq import Seq
 from pathlib import Path
 
 def run_prodigal(output_prefix, input_fasta):
+	''' Runs prodigal on a genome.
+	Args: 
+		output_prefix: prefix of output file.
+		input_fasta: path to FASTA file.
+
+	Returns:
+		The name of the prodigal FAA file generated. 
+	'''
+
 	cmd = 'prodigal -i {} -a {}.faa'
 	cmd = cmd.format(input_fasta, output_prefix)
 	
@@ -27,6 +36,16 @@ def run_prodigal(output_prefix, input_fasta):
 		print("ERROR: FASTA file doesn't exist")
 
 def run_hmmer(output_prefix, prodigal_fasta, threads):
+	''' Runs HMMER to identify RM genes on a set of protein predictions.
+	Args: 
+		output_prefix: prefix of output file.
+		prodigal_fasta: path to prodigal FAA file.
+		threads: number of threads to pass to HMMER
+
+	Returns:
+		The name of the HMMER file created. 
+	'''
+
 	cmd = 'hmmsearch --cut_ga --cpu {} --domtblout {}.hits {} {}'
 
 	rm_hmm_file = os.path.dirname(__file__)   + "/db/HMMs/RM_HMMs.hmm"
@@ -42,6 +61,16 @@ def run_hmmer(output_prefix, prodigal_fasta, threads):
 		print("ERROR: Prodigal output file not found")
 
 def extract_genes(hits, prodigal_fasta, output_prefix):
+	'''Creates a FASTA file of genes involved in RM.
+	Args:
+		hits: a dictionary of genes to their corresponding HMM hits.
+		prodigal_fasta: path to the FAA file created by prodigal.
+		output_prefix: prefix of output file.
+
+	Returns:
+		Name of RM protein sequence file created.
+	'''
+
 	rm_gene_file = output_prefix + ".rm.genes.faa"
 	f = open(rm_gene_file, 'w+')
 
@@ -54,6 +83,17 @@ def extract_genes(hits, prodigal_fasta, output_prefix):
 	return rm_gene_file
 
 def resolve_hits(hmmer_output, output_prefix):
+	'''Runths cath-resolve-hits on the output of HMMER. This resolves
+	the best non-overlapping set of HMMs for each gene.
+
+	Args:
+		hmmer_output: the path of the file output by HMMER
+		output_prefix: prefix of output file.
+
+	Returns:
+		Name of cath resolve hits file created.
+	'''
+
 	cmd = "cath-resolve-hits --input-format hmmer_domtblout {} --hits-text-to-file {}.resolved.hits"
 
 	cmd = cmd.format(hmmer_output, output_prefix)
@@ -64,6 +104,17 @@ def resolve_hits(hmmer_output, output_prefix):
 
 
 def parse_hmmer(resolved_hits):
+	'''Reads the output of cath resolve hits and converts it into dictionaries
+	linking each gene to information about that gene.
+
+	Args:
+		resolved_hits: the path of the file output by cath-resolve-hits
+
+	Returns:
+		hits: a defaultdictionary where keys are genes and values are lists of their HMM names.
+		locations: a dictionary where keys are genes and values are tuples of (contig, gene number).
+		evalues: a defaultdictionary where keys are genes, values are dictionaries with HMMs as keys and values as evalues.
+	'''	
 
 	offtarget_file = os.path.dirname(__file__)   + "/db/HMMs/off_target.txt"
 	offtarget = []
@@ -92,6 +143,19 @@ def parse_hmmer(resolved_hits):
 	return hits, locations, evalues
 
 def create_gene_table(hits, gene_locations, system_types, evalues, blast_hits, gene_window = 10):
+	'''Creates a final table of RM genes organized by their types and their operon status.
+	Args:
+		hits: a defaultdictionary where keys are genes and values are lists of their HMM names.
+		gene_locations: a dictionary where keys are genes and values are tuples of (contig, gene number).
+		system_types: Dictionary of HMMs to RM system types
+		evalues: a defaultdictionary where keys are genes, values are dictionaries with HMMs as keys and values as evalues.
+		blast_hits: dictionary of genes-> blast hits, from read_blast()
+		gene_window: the window size to use to call operons.
+	Returns:
+		gene_table: A final pandas table of RM genes organized by type and operon.
+		
+	'''	
+
 	gene_table = []
 
 	for hit in hits:
@@ -196,6 +260,13 @@ def create_gene_table(hits, gene_locations, system_types, evalues, blast_hits, g
 	return gene_table
 
 def run_rebase_blast(rm_gene_file, output_prefix, threads):
+	'''Run a BLAST of RM gene files against REBASE
+	Args:
+		rm_gene_file: a defaultdictionary where keys are genes and values are lists of their HMM names.
+		output_prefix: a dictionary where keys are genes and values are tuples of (contig, gene number).
+	Returns:
+		file path of BLAST output.
+	'''	
 
 	cmd = 'blastp -query {} -db {} -outfmt 6 -evalue 1e-5 -num_threads {} > {}.blast'
 
@@ -210,6 +281,13 @@ def run_rebase_blast(rm_gene_file, output_prefix, threads):
 	return "{}.blast".format(output_prefix)
 
 def read_blast(blast_file):
+	''' Read the output of BLAST
+	Args:
+		blast_file: path to a file output by BLAST against REBASE database.
+	Returns:
+		blast_hits: dictionary of BLAST hits
+	'''
+	
 	f = open(blast_file)
 	blast_hits = {}
 	prots = set()
