@@ -2,6 +2,8 @@
 
 MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in nanopore sequencing.
 
+![Overview of the MicrobeMod pipeline](./PipelineOverview.png?raw=true")
+
 ## External dependencies
 
 Before installation, make sure the following external dependencies are available in your path. 
@@ -43,7 +45,7 @@ pytest -rP -k test_dependencies
 
 ## Quick start
 
-To run `MicrobeMod call_methylation` with 10 threads:
+If you have a reference mapped, indexed, and sorted BAM output from Dorado, to run `MicrobeMod call_methylation` with 10 threads:
 
 ```
 MicrobeMod call_methylation -b mapped_reads.bam -r genome_reference.fna -t 10
@@ -116,7 +118,7 @@ Saving motif output to: LIBRARY_NAME_motifs.tsv
 
 Often, MicrobeMod is robust to the exact parameters used, and the same motifs are returned regardless of these settings. However, there may be tricky motifs or edge cases in which it is valuable to re-run with tweaking these settings:
 
-1. `--min_coverage 10`: this is a stranded coverage. So if your genome coverage is 20x, then on average each strand will have 10x coverage. This number should be considerably lower than your actual coverage. If your coverage is as low as 10x, then consider setting this value to `--min_coverage 3`. I would not recommend much lower than that. You can determine your mean depth of coverage with `samtools coverage LIBRARY_NAME.mapped.bam`.
+1. `--min_strand_coverage 10`: this is a stranded coverage. So if your genome coverage is 20x, then on average each strand will have 10x coverage. This number should be considerably lower than your actual coverage. If your coverage is as low as 10x, then consider setting this value to `--min_strand_coverage 3`. I would not recommend much lower than that. You can determine your mean depth of coverage with `samtools coverage LIBRARY_NAME.mapped.bam`.
 2. `--methylation_confidence_threshold 0.66` - this is the confidence threshold that Modkit will use to decide if an **individual read** is methylated.
 3. `--percent_methylation_cutoff 0.66` - this is the percentage of reads mapping to a site that have to be called as methylated to consider that site as methylated. Consider increasing for more stringent motif calling.
 4. `--percent_cutoff_streme 0.9` - this is the percentage of reads mapping to a site that have to be called as methylated to pass that site to motif calling. Consider decreasing for broader motif calling.
@@ -212,7 +214,7 @@ Description of columns:
 
 ```
 usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA [-m METHYLATION_TYPES]
-                                   [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_coverage MIN_COVERAGE]
+                                   [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_strand_coverage MIN_STRAND_COVERAGE]
                                    [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD]
                                    [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
                                    [--percent_cutoff_streme PERCENT_CUTOFF_STREME] [-t THREADS]
@@ -230,7 +232,7 @@ optional arguments:
                         Output prefix. Default is based on the BAM filename.
   -s STREME_PATH, --streme_path STREME_PATH
                         Path to streme executable.
-  --min_coverage MIN_COVERAGE
+  --min_strand_coverage MIN_STRAND_COVERAGE
                         Minimum coverage required to call a site as methylated. Note this is per strand (so
                         half of total coverage). Default: 10x
   --methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD
