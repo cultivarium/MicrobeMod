@@ -184,10 +184,10 @@ test.faa: Prodigal .faa file (all proteins)
 test.hits: Raw output of HMMER
 test.resolved.hits: Resolved best HMMER hits 
 test.rm.genes.faa: A FASTA file of RM proteins identified in this study
-test_RM_genes.tsv: Tabular output describing RM genes
+test.rm.genes.tsv: Tabular output describing RM genes
 ```
 
-The `_RM_genes.tsv` file will look something like this:
+The `*.rm.genes.tsv` file will look something like this:
 
 | Operon       | Gene                                   | System Type | Gene type | HMM                                   | Evalue   | REBASE homolog      | Homolog identity(%) | Homolog methylation | Homolog motif |
 |--------------|----------------------------------------|-------------|-----------|---------------------------------------|----------|---------------------|---------------------|---------------------|---------------|
