@@ -9,9 +9,10 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 Before installation, make sure the following external dependencies are available in your path. 
 
 ### Dependencies for `MicrobeMod annotate_rm`
-1. **Prodigal**, **BLAST**, and **HMMER**: `conda install -c bioconda prodigal hmmer blast`
+1. **Prodigal**, **BLAST**, and **HMMER**:
+These can most easily be installed with conda: `conda install -c bioconda prodigal hmmer blast`
 
-2. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
+3. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
 
 ### Dependencies for `MicrobeMod call_methylation`
 
@@ -43,6 +44,12 @@ To confirm that you have the correct dependencies installed, run:
 pytest -rP -k test_dependencies
 ```
 
+To run all tests:
+
+```
+pytest
+```
+
 ## Quick start
 
 If you have a reference mapped, indexed, and sorted BAM output from Dorado, to run `MicrobeMod call_methylation` with 10 threads:
@@ -57,6 +64,10 @@ To run `MicrobeMod annotate_rm` with 10 threads:
 ```
 MicrobeMod annotate_rm -f genome_reference.fasta -o genome_reference -t 10
 ```
+
+Example BAM and FASTA files are available as:
+
+`./tests/test_data/test.bam` and `./tests/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna`.
 
 # Step-by-step tutorial
 
