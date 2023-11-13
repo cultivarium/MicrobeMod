@@ -1,0 +1,23 @@
+{
+  "python.formatting.blackArgs": [
+    "--line-length=120"
+  ],
+  "python.formatting.provider": "black",
+  "python.linting.enabled": true,
+  "python.linting.lintOnSave": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.pylintArgs": [
+    "--rcfile=setup.cfg"
+  ],
+  "python.sortImports.args": [
+    "--profile=black"
+  ],
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": true
+    }
+  }
+}
