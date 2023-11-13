@@ -35,12 +35,12 @@ def test_dependencies():
 def test_read_modkit():
     min_coverage = 10
 
-    test_fasta = "./test/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna"
+    test_fasta = "./tests/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna"
     for record in SeqIO.parse(test_fasta, "fasta"):
         microbemod.REF[record.id] = record.seq
-    r = read_modkit("./test/test_data/test.bed", min_coverage).round(2)
+    r = read_modkit("./tests/test_data/test.bed", min_coverage).round(2)
     print(r)
-    read_modkit_result = pd.read_csv("./test/test_data/read_modkit_result.csv")
+    read_modkit_result = pd.read_csv("./tests/test_data/read_modkit_result.csv")
     assert r.equals(read_modkit_result)
 
 
@@ -48,9 +48,9 @@ def test_write_to_fasta():
     percent_cutoff_streme = 0.9
     min_coverage = 10
     methylation_type = "a"
-    output_prefix = "./test/test_data/test"
+    output_prefix = "./tests/test_data/test"
 
-    modkit_table_tmp = pd.read_csv("./test/test_data/read_modkit_result.csv")
+    modkit_table_tmp = pd.read_csv("./tests/test_data/read_modkit_result.csv")
 
     fasta_out = write_to_fasta(
         modkit_table_tmp,
@@ -63,7 +63,7 @@ def test_write_to_fasta():
     # Read in the FASTA that we just wrote
     ref_seqs = [
         str(record.seq)
-        for record in SeqIO.parse("./test/test_data/test_fasta.fasta", "fasta")
+        for record in SeqIO.parse("./tests/test_data/test_fasta.fasta", "fasta")
     ]
     new_seqs = [str(record.seq) for record in SeqIO.parse(fasta_out, "fasta")]
 
@@ -71,10 +71,10 @@ def test_write_to_fasta():
 
 
 def test_assign_motifs():
-    modkit_table = pd.read_csv("./test/test_data/read_modkit_result.csv")
-    streme_output = "./test/test_data/test_streme_output/"
+    modkit_table = pd.read_csv("./tests/test_data/read_modkit_result.csv")
+    streme_output = "./tests/test_data/test_streme_output/"
 
-    test_fasta = "./test/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna"
+    test_fasta = "./tests/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna"
     for record in SeqIO.parse(test_fasta, "fasta"):
         microbemod.REF[record.id] = record.seq
 

@@ -1,19 +1,24 @@
-from Bio import SeqIO
 import os
+import sys
 import random
-import argparse
-import pandas as pd
-from collections import defaultdict
+import logging
 import subprocess
-from Bio.SeqUtils import nt_search
-from Bio.Seq import Seq
 import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+import pandas as pd
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqUtils import nt_search
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)-8s %(message)s', datefmt='%y-%m-%d %H:%M:%S', stream=sys.stdout)
 
 METHYLATION_TYPES = {"6mA": "a", "5mC": "m"}
 
 REF = {}
 WINDOW_SIZE = 12
-
+MIN_EVALUE = 0.1
+MOTIF_FREQ_CUTOFF = 0.8 #If a nucleotide isn't 80% of sites in a motif, converted to an N
 
 def get_seq(position):
     """Returns a sequence of a fixed size at a particular position in the reference genome.
@@ -67,7 +72,7 @@ def run_modkit(
         fasta=fasta_file,
         threshold=methylation_confidence_threshold,
     )
-    print("Running modkit: {}".format(cmd))
+    logging.info("Running modkit: {}".format(cmd))
     output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode()
 
     return low_modkit_file
@@ -82,7 +87,7 @@ def read_modkit(low_modkit_output, min_coverage=10):
         final_table: A pandas dataframe containing information about modified sites in the genome.
     """
 
-    print("Reading low cutoff Modkit table...")
+    logging.info("Reading low cutoff Modkit table...")
     d = pd.read_csv(low_modkit_output, sep="\t", header=None)
 
     ## Rename columns
@@ -123,23 +128,23 @@ def read_modkit(low_modkit_output, min_coverage=10):
     ## Merge tables
     final_table = d
 
-    print("Retrieving sequences")
+    logging.info("Retrieving sequences")
     final_table["RefBase"] = final_table.SNP_Position.map(get_ref_pos)
     final_table["Sequence"] = final_table.SNP_Position.map(get_seq)
 
     ## Summary: mean coverage
-    print(
+    logging.info(
         "Total number of sites with any possible calls (including low quality): {} bases".format(
             final_table.shape[0]
         )
     )
-    print(
+    logging.info(
         "Median coverage (stranded): {}x".format(final_table["Total_coverage"].median())
     )
 
     ## Sites > min coverage
     min_coverage_table = final_table[final_table.Total_coverage >= min_coverage]
-    print(
+    logging.info(
         "Total number of sites with greater than min coverage ({}x): {} bases".format(
             min_coverage, min_coverage_table.shape[0]
         )
@@ -147,17 +152,17 @@ def read_modkit(low_modkit_output, min_coverage=10):
 
     for meth_type in d["Modification"].unique():
         m_table = min_coverage_table[min_coverage_table.Modification == meth_type]
-        print(
+        logging.info(
             "Potential sites (>33%) for methylation type {}: {} bases".format(
                 meth_type, m_table[m_table.Percent_modified >= 0.33].shape[0]
             )
         )
-        print(
+        logging.info(
             "High quality sites (>66%) for methylation type {}: {} bases".format(
                 meth_type, m_table[m_table.Percent_modified >= 0.66].shape[0]
             )
         )
-        print(
+        logging.info(
             "Very high quality sites (>90%) for methylation type {}: {} bases".format(
                 meth_type, m_table[m_table.Percent_modified >= 0.90].shape[0]
             )
@@ -176,12 +181,12 @@ def write_to_fasta(
         mod_type: either "a" or "m", referring to m5C or 6mA
         percent_cutoff: The cutoff of % of reads that has to be methylated to be written out.
         min_coverage: Minimum coverage of a site required to write that site to the output.
-        subsample: optional parameter if only passing a random subsample.
+        subsample: optional parameter, the portion of sites to randomly subsample down.
     Returns:
         fn_name: file name of the FASTA file created.
     """
 
-    print("Modkit table size: {}".format(modkit_table.shape[0]))
+    logging.info("Modkit table size: {}".format(modkit_table.shape[0]))
     modkit_table = modkit_table[modkit_table.Percent_modified >= percent_cutoff]
     modkit_table = modkit_table[modkit_table.Total_coverage >= min_coverage]
     modkit_table = modkit_table[modkit_table.Modification == mod_type]
@@ -189,7 +194,7 @@ def write_to_fasta(
     if subsample != 1:
         modkit_table = modkit_table.sample(int(modkit_table.shape[0] * subsample))
 
-    print(
+    logging.info(
         "{} sites for STREME with cutoff {} and min coverage {}".format(
             modkit_table.shape[0], percent_cutoff, min_coverage
         )
@@ -207,7 +212,7 @@ def write_to_fasta(
         f.close()
 
         background_file = fn_name.replace("_pos.fasta", "_control.fasta")
-        print("Creating background control distribution: {}".format(background_file))
+        logging.info("Creating background control distribution: {}".format(background_file))
         reference_genome = ""
         for r in REF:
             reference_genome += str(REF[r])
@@ -226,7 +231,7 @@ def write_to_fasta(
 
         return fn_name
     else:
-        print(
+        logging.info(
             "Note: Fewer than 10 methylated sites identified, no motif finding was run."
         )
         return None
@@ -256,7 +261,7 @@ def run_streme(kmer_file, prefix, streme_path="streme"):
         input_file=kmer_file,
         background_input=kmer_file.replace("_pos.fasta", "_control.fasta"),
     )
-    print("Running STREME: {}".format(cmd))
+    logging.info("Running STREME: {}".format(cmd))
 
     try:
         output = subprocess.check_output(
@@ -285,7 +290,7 @@ def assign_motifs(modkit_table, streme_output):
     motif_total = defaultdict(int)
     for motif in root[1]:
         evalue = float(motif.get("test_evalue"))
-        if evalue < 0.1:
+        if evalue < MIN_EVALUE:
             ### Evalue cutoff
             motif_old = motif.get("id").split("-")[1]
             motif_new = ""
@@ -295,13 +300,13 @@ def assign_motifs(modkit_table, streme_output):
             for pos in motif:
                 freqs = [float(x) for x in pos.attrib.values()]
                 if motif_old[i] in ["A", "C", "G", "T"]:  # If it's a single base
-                    if max(freqs) <= 0.8:  # If it's not >80%, make it N
+                    if max(freqs) <= MOTIF_FREQ_CUTOFF:  # If it's not >80%, make it N
                         motif_new += "N"
                     else:
                         motif_new += motif_old[i]
                 elif motif_old[i] in ["W", "S", "M", "K", "R", "Y"]:  # If it's a double
                     top_two = sum(sorted(freqs)[-2:])
-                    if top_two <= 0.8:  # If it's not >80%, make it N
+                    if top_two <= MOTIF_FREQ_CUTOFF:  # If it's not >80%, make it N
                         motif_new += "N"
                     else:
                         motif_new += motif_old[i]
@@ -313,7 +318,7 @@ def assign_motifs(modkit_table, streme_output):
 
             ### trim N's
             motif_new = motif_new.strip("N")
-            print(
+            logging.info(
                 "Found and trimmed motif: "
                 + motif.get("id")
                 + "\t"
@@ -375,8 +380,8 @@ def make_motif_table(modkit_table):
             ### Get Average_Percent_methylation_per_site
             average = motif_data.Percent_modified.mean()
 
-            print("Counting genome sites for: " + motif)
-            print("Motif has {} methylated instances".format(motif_data.shape[0]))
+            logging.info("Counting genome sites for: " + motif)
+            logging.info("Motif has {} methylated instances".format(motif_data.shape[0]))
             ### Get genome counts
             genome_counts = 0
             methylated_counts = 0
@@ -411,10 +416,10 @@ def make_motif_table(modkit_table):
 
                     if methylated:
                         methylated_counts += 1
-            print("Methylated positions in motif {}:".format(motif))
+            logging.info("Methylated positions in motif {}:".format(motif))
             m_pos_counts = pd.Series(motif_methylated_positions).value_counts()
             m_pos_counts = m_pos_counts / m_pos_counts.sum() * 100
-            print(m_pos_counts)
+            logging.info(m_pos_counts)
 
             ## Get top two positions and their frequencies
             if len(m_pos_counts.index) >= 1:
@@ -524,7 +529,7 @@ def main(
     # Step 3: For each methylation, create FASTA and run STREME
     i = 0
     for methylation_type in methylation_types.split(","):
-        print("Running for Methylation type: {}".format(methylation_type))
+        logging.info("Running for Methylation type: {}".format(methylation_type))
         methylation = METHYLATION_TYPES[methylation_type]
 
         modkit_table_tmp = modkit_table[modkit_table.Modification == methylation]
@@ -570,12 +575,12 @@ def main(
         final_motif_table.reset_index().round(2).to_csv(
             output_prefix + "_motifs.tsv", sep="\t"
         )
-        print("Complete!")
-        print(
+        logging.info("Complete!")
+        logging.info(
             "Saving methylated site table to: {}".format(
                 output_prefix + "_methylated_sites.tsv"
             )
         )
-        print("Saving motif output to: {}".format(output_prefix + "_motifs.tsv"))
+        logging.info("Saving motif output to: {}".format(output_prefix + "_motifs.tsv"))
     except:
         raise SystemExit("Error: No methylated sites sent to STREME.")

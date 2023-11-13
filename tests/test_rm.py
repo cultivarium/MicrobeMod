@@ -46,7 +46,7 @@ def test_dependencies():
 
 def test_parse_hmmer():
     gene_hits, gene_locations, evalues = parse_hmmer(
-        "./test/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
+        "./tests/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
     )
     expected = {
         "NC_000913.3_1130": ["Type_IV_05-RM_Type_IV__Type_IV_REases"],
@@ -101,7 +101,7 @@ def test_parse_hmmer():
 
 
 def test_read_blast():
-    blast_hits = read_blast("./test/test_data/EcoliCVM05_GCF_000005845.blast")
+    blast_hits = read_blast("./tests/test_data/EcoliCVM05_GCF_000005845.blast")
     expected = {
         "NC_000913.3_1130": ("SsoSE61ORF22640P", 100.0, "", "YCGR"),
         "NC_000913.3_1932": ("M.SflLIN6DcmP", 100.0, "m5C", "CCWGG"),
@@ -130,9 +130,9 @@ def test_create_gene_table():
         system_types[row["Name"]] = (row["Enzyme_type"], row["System"])
 
     gene_hits, gene_locations, evalues = parse_hmmer(
-        "./test/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
+        "./tests/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
     )
-    blast_hits = read_blast("./test/test_data/EcoliCVM05_GCF_000005845.blast")
+    blast_hits = read_blast("./tests/test_data/EcoliCVM05_GCF_000005845.blast")
 
     gene_table = create_gene_table(
         gene_hits, gene_locations, system_types, evalues, blast_hits

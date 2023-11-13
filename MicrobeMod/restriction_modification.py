@@ -1,16 +1,16 @@
 import os
 import sys
-import glob
-from collections import defaultdict
+import logging
 import subprocess
+from pathlib import Path
+from collections import defaultdict
+
 import pandas as pd
 from Bio import SeqIO
-import argparse
-import subprocess
-from Bio.SeqUtils import nt_search
 from Bio.Seq import Seq
-from pathlib import Path
+from Bio.SeqUtils import nt_search
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)-8s %(message)s', datefmt='%y-%m-%d %H:%M:%S', stream=sys.stdout)
 
 def run_prodigal(output_prefix, input_fasta):
     """Runs prodigal on a genome.
@@ -26,7 +26,7 @@ def run_prodigal(output_prefix, input_fasta):
     cmd = cmd.format(input_fasta, output_prefix)
 
     if os.path.isfile(input_fasta):
-        print("Running prodigal: {}".format(cmd))
+        logging.info("Running prodigal: {}".format(cmd))
 
         subprocess.run(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True
@@ -35,7 +35,7 @@ def run_prodigal(output_prefix, input_fasta):
         return output_prefix + ".faa"
 
     else:
-        print("ERROR: FASTA file doesn't exist")
+        logging.error("ERROR: FASTA file doesn't exist")
 
 
 def run_hmmer(output_prefix, prodigal_fasta, threads):
@@ -56,13 +56,13 @@ def run_hmmer(output_prefix, prodigal_fasta, threads):
     cmd = cmd.format(threads, output_prefix, rm_hmm_file, prodigal_fasta)
 
     if os.path.isfile(prodigal_fasta):
-        print("Running HMMER: " + cmd)
+        logging.info("Running HMMER: " + cmd)
         subprocess.run(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True
         )
         return "{}.hits".format(output_prefix)
     else:
-        print("ERROR: Prodigal output file not found")
+        logging.error("ERROR: Prodigal output file not found")
 
 
 def extract_genes(hits, prodigal_fasta, output_prefix):
@@ -103,7 +103,7 @@ def resolve_hits(hmmer_output, output_prefix):
     cmd = "cath-resolve-hits --input-format hmmer_domtblout {} --hits-text-to-file {}.resolved.hits"
 
     cmd = cmd.format(hmmer_output, output_prefix)
-    print("Running cath: " + cmd)
+    logging.info("Running cath: " + cmd)
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True)
     return "{}.resolved.hits".format(output_prefix)
 
@@ -293,7 +293,7 @@ def run_rebase_blast(rm_gene_file, output_prefix, threads):
 
     cmd = cmd.format(rm_gene_file, blast_db_file, threads, output_prefix)
 
-    print("Running BLASTP against REBASE: " + cmd)
+    logging.info("Running BLASTP against REBASE: " + cmd)
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True)
 
     return "{}.blast".format(output_prefix)
@@ -348,4 +348,4 @@ def main(fasta, output_prefix, threads):
     gene_table = create_gene_table(
         gene_hits, gene_locations, system_types, evalues, blast_hits
     )
-    gene_table.to_csv(output_prefix + "_RM_genes.tsv", sep="\t", index=False)
+    gene_table.to_csv(output_prefix + ".rm.genes.tsv", sep="\t", index=False)
