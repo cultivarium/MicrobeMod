@@ -23,11 +23,12 @@ Before installation, make sure the following external dependencies are available
 1. **Prodigal**, **BLAST**, and **HMMER**:
 These can most easily be installed with conda: `conda install -c bioconda prodigal hmmer blast`
 
-3. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
+2. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
 
 ### Dependencies for `MicrobeMod call_methylation`
 
 3. **Modkit v0.2.2**: https://github.com/nanoporetech/modkit
+You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
   
 4. **STREME**: https://meme-suite.org/meme/doc/download.html
 
