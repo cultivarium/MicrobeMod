@@ -121,7 +121,7 @@ def test_read_blast():
 def test_create_gene_table():
     metadata_file = (
         "/"
-        + os.path.dirname(__file__).strip("/test")
+        + os.path.dirname(__file__)[:-6]
         + "/MicrobeMod/db/restriction_metadata.csv"
     )
     metadata = pd.read_csv(metadata_file)
