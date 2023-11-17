@@ -17,7 +17,7 @@ aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ 
 
 ## External dependencies
 
-Before installation, make sure the following external dependencies are available in your path. 
+Before installation, make sure the following external dependencies are available in your path.
 
 ### Dependencies for `MicrobeMod annotate_rm`
 1. **Prodigal**, **BLAST**, and **HMMER**:
@@ -31,6 +31,7 @@ These can most easily be installed with conda: `conda install -c bioconda prodig
 You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
   
 4. **STREME**: https://meme-suite.org/meme/doc/download.html
+You can also install STREME via conda: `conda install -c bioconda meme`.
 
 ## MicrobeMod installation
 ```
