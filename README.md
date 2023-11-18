@@ -6,48 +6,58 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 
 ## External dependencies
 
-Before installation, make sure the following external dependencies are available in your path. 
+Before installation, make sure the following external dependencies are available in your path. Installation instructions for conda and most packages are below, however cath-resolve-hits must be installed manually.
 
 ### Dependencies for `MicrobeMod annotate_rm`
-1. **Prodigal**, **BLAST**, and **HMMER**:
-These can most easily be installed with conda: `conda install -c bioconda prodigal hmmer blast`
 
-3. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
+1. **Prodigal**
+2. **BLAST**
+3. **HMMER**:
+4. [**Cath-resolve-hits**](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
 
 ### Dependencies for `MicrobeMod call_methylation`
 
-3. **Modkit v0.2.2**: https://github.com/nanoporetech/modkit
-  
-4. **STREME**: https://meme-suite.org/meme/doc/download.html
+1. **Modkit v0.2.2**: https://github.com/nanoporetech/modkit
+2. **STREME**: https://meme-suite.org/meme/doc/download.html
 
-## MicrobeMod installation
+## Installation
+
+1. Clone repo and install dependencies:
 ```
 git clone https://github.com/cultivarium/MicrobeMod.git
-cd MicrobeMod/MicrobeMod/
-```
-
-Download the database (required for `annotate_rm` only - includes HMMs from [DefenseFinder](https://defense-finder.mdmparis-lab.com/) and PFAM and [REBASE](http://rebase.neb.com/) proteins):
-```
-python download_db.py
-```
-
-Install:
-
-```
-cd ../
-pip install .
+cd MicrobeMod/
+conda create -n microbemod
+conda activate microbemod
+conda install -c conda-forge libcxx
+conda install -c bioconda blast hmmer prodigal
+conda install -c bioconda meme
+conda install -c nanoporetech modkit
 ```
 
 To confirm that you have the correct dependencies installed, run:
+```
+conda list | grep -E "blast|hmmer|meme|modkit|prodigal"
+command -v cath-resolve-hits
+```
 
+2. Download the database (required for `annotate_rm` only - includes HMMs from [DefenseFinder](https://defense-finder.mdmparis-lab.com/) and PFAM and [REBASE](http://rebase.neb.com/) proteins):
 ```
-pytest -rP -k test_dependencies
+cd MicrobeMod/MicrobeMod/
+python download_db.py
 ```
+
+3. Install MicrobeMod:
+```
+cd ../
+conda install --yes --file requirements.txt
+```
+
+## Tests
 
 To run all tests:
 
 ```
-pytest
+python -m pytest
 ```
 
 ## Quick start
@@ -71,8 +81,7 @@ Example BAM and FASTA files are available as:
 
 # Step-by-step tutorial
 
-
-### Step 1: Basecalling with Dorado
+## Step 1: Basecalling with Dorado
 
 The first step for methylation motif identification is running [Dorado](https://github.com/nanoporetech/dorado) basecalling with modified basecalling models. 
 

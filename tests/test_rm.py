@@ -11,39 +11,6 @@ from MicrobeMod.restriction_modification import create_gene_table
 from pandas.testing import assert_frame_equal
 
 
-def test_dependencies():
-    found = True
-    try:
-        subprocess.call(["prodigal"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("prodigal not found in path."))
-        found = False
-
-    try:
-        subprocess.call(["hmmsearch"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("HMMER (hmmsearch) not found in path. "))
-        found = False
-
-    assert found
-
-    try:
-        subprocess.call(["blastp"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("BLASTP not found in path. "))
-        found = False
-
-    assert found
-
-    try:
-        subprocess.call(["cath-resolve-hits"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("cath-resolve-hits not found in path. "))
-        found = False
-
-    assert found
-
-
 def test_parse_hmmer():
     gene_hits, gene_locations, evalues = parse_hmmer(
         "./tests/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
