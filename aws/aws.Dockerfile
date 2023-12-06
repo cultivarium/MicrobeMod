@@ -28,7 +28,6 @@ RUN ./dorado-0.4.1-linux-x64/bin/dorado download --model dna_r10.4.1_e8.2_400bps
 RUN ./dorado-0.4.1-linux-x64/bin/dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0_5mC@v2
 RUN ./dorado-0.4.1-linux-x64/bin/dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0_6mA@v3
 
-
 COPY --chown=ubuntu:ubuntu ./run_dorado.sh ./run_dorado.sh
 RUN chmod +x /home/ubuntu/run_dorado.sh
 

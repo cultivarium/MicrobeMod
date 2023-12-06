@@ -28,16 +28,10 @@ git clone https://github.com/cultivarium/MicrobeMod.git
 cd MicrobeMod/
 conda create -n microbemod
 conda activate microbemod
-conda install -c conda-forge libcxx
 conda install -c bioconda blast hmmer prodigal
+conda install -c bioconda cath-tools
 conda install -c bioconda meme
 conda install -c nanoporetech modkit
-```
-
-To confirm that you have the correct dependencies installed, run:
-```
-conda list | grep -E "blast|hmmer|meme|modkit|prodigal"
-command -v cath-resolve-hits
 ```
 
 2. Download the database (required for `annotate_rm` only - includes HMMs from [DefenseFinder](https://defense-finder.mdmparis-lab.com/) and PFAM and [REBASE](http://rebase.neb.com/) proteins):
@@ -49,8 +43,54 @@ python download_db.py
 3. Install MicrobeMod:
 ```
 cd ../
-conda install --yes --file requirements.txt
+pip install .
 ```
+
+### Docker
+
+Alternatively, you can run MicrobeMod in a Docker container. The simplest way is to download the pre-built image:
+```
+TODO: add image link
+```
+
+#### Run 
+
+```
+docker run -v $(pwd):/files microbemod -s call_methylation -b mapped_reads.bam -r genome_reference.fna
+docker run -v $(pwd):/files microbemod -s annotate_rm -r genome_reference.fna
+```
+
+On ARM64:
+```
+docker run --platform linux/amd64 -v $(pwd):/files microbemod call_methylation -b mapped_reads.bam -r genome_reference.fna
+docker run --platform linux/amd64 -v $(pwd):/files microbemod -s annotate_rm -r genome_reference.fna
+```
+
+#### Build
+
+Build:
+```
+docker build -t microbemod -f Dockerfile .
+```
+
+Build on ARM64:
+```
+docker buildx create --name builder --use --bootstrap
+docker buildx build --load -t microbemod --platform linux/amd64 -f Dockerfile .
+```
+
+#### Run
+
+Call methylation:
+```
+docker run --rm --platform linux/amd64 -v $(pwd):/files microbemod -s call_methylation -b mapped_reads.bam -r genome_reference.fna -t 10
+```
+
+Annotate RM:
+```
+docker run --rm --platform linux/amd64 -v $(pwd):/files microbemod -s annotate_rm -f genome_reference.fna -o genome_reference -t 10
+```
+
 
 ## Tests
 
@@ -68,11 +108,10 @@ If you have a reference mapped, indexed, and sorted BAM output from Dorado, to r
 MicrobeMod call_methylation -b mapped_reads.bam -r genome_reference.fna -t 10
 ```
 
-
 To run `MicrobeMod annotate_rm` with 10 threads:
 
 ```
-MicrobeMod annotate_rm -f genome_reference.fasta -o genome_reference -t 10
+MicrobeMod annotate_rm -f genome_reference.fna -o genome_reference -t 10
 ```
 
 Example BAM and FASTA files are available as:
@@ -134,7 +173,7 @@ Saving methylated site table to: LIBRARY_NAME_methylated_sites.tsv
 Saving motif output to: LIBRARY_NAME_motifs.tsv
 ```
 
-### Parameters to tune
+#### Parameters to tune
 
 Often, MicrobeMod is robust to the exact parameters used, and the same motifs are returned regardless of these settings. However, there may be tricky motifs or edge cases in which it is valuable to re-run with tweaking these settings:
 
@@ -145,7 +184,7 @@ Often, MicrobeMod is robust to the exact parameters used, and the same motifs ar
 
 Tweaking this parameters, and re-running with slightly different ones, may result in more accurate motifs called, and can be worth playing with. 
 
-### Interpreting Methylation output
+#### Interpreting Methylation output
 
 The two primary processed output files will be two tab-separated tables, one describing information for all methylated sites (large) and one describing output for methylated motifs (small). 
 
