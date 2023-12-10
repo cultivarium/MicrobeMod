@@ -20,6 +20,7 @@ def run_prodigal(output_prefix, input_fasta):
 
     Returns:
             The name of the prodigal FAA file generated.
+            gene_locations: a dictionary of genes to (contig, gene_num)
     """
 
     cmd = "prodigal -i {} -a {}.faa"
@@ -32,10 +33,52 @@ def run_prodigal(output_prefix, input_fasta):
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True
         )
 
-        return output_prefix + ".faa"
+        gene_locations = {} # values are (contig, gene_num)
+        for record in SeqIO.parse(output_prefix + ".faa", "fasta"):
+            gene_locations[record.id] = ("_".join(record.id.split("_")[:-1]),int(record.id.split("_")[-1]))
+        return output_prefix + ".faa", gene_locations
 
     else:
         logging.error("ERROR: FASTA file doesn't exist")
+        raise SystemExit("Cannot find FASTA file- quitting....")
+
+def convert_genbank(output_prefix, input_genbank):
+    """Converts a Genbank file to resemble a .FAA file from prodigal.
+    Args:
+            output_prefix: prefix of output file.
+            input_genbank: path to Genbank file.
+
+    Returns:
+            The name of the FAA file converted.
+            gene_locations: a dictionary of genes to (contig, gene_num)
+    """
+
+    if os.path.isfile(input_genbank):
+        logging.info("Reading genbank file: {}".format(input_genbank))
+
+        f = open(output_prefix + ".faa", 'w+')
+        gene_locations = {} # values are (contig, gene_num)
+        for record in SeqIO.parse(input_genbank, 'genbank'):
+            i = 1
+            for feature in record.features:
+                if feature.type == 'CDS' and 'translation' in feature.qualifiers:
+                    f.write(">{} # {} # {} # {} # {}_{}\n".format(
+                        feature.qualifiers['locus_tag'][0],
+                        feature.location.start,
+                        feature.location.end,
+                        feature.location.strand,
+                        record.id,
+                        i
+                        ))
+                    f.write(feature.qualifiers['translation'][0] + "\n")
+                    gene_locations[feature.qualifiers['locus_tag'][0]] = (record.id, i)
+                    i += 1
+
+        return output_prefix + ".faa", gene_locations
+
+    else:
+        logging.error("ERROR: FASTA file doesn't exist")
+        raise SystemExit("Cannot find FASTA file- quitting....")
 
 
 def run_hmmer(output_prefix, prodigal_fasta, threads):
@@ -63,6 +106,7 @@ def run_hmmer(output_prefix, prodigal_fasta, threads):
         return "{}.hits".format(output_prefix)
     else:
         logging.error("ERROR: Prodigal output file not found")
+        raise SystemExit("Cannot find FAA file- quitting....")
 
 
 def extract_genes(hits, prodigal_fasta, output_prefix):
@@ -117,7 +161,6 @@ def parse_hmmer(resolved_hits):
 
     Returns:
             hits: a defaultdictionary where keys are genes and values are lists of their HMM names.
-            locations: a dictionary where keys are genes and values are tuples of (contig, gene number).
             evalues: a defaultdictionary where keys are genes, values are dictionaries with HMMs as keys and values as evalues.
     """
 
@@ -130,22 +173,18 @@ def parse_hmmer(resolved_hits):
 
     f = open(resolved_hits)
     hits = defaultdict(list)
-    locations = {}
     evalues = defaultdict(dict)
     for line in f.readlines():
         if not line.startswith("#"):
             gene = line.split()[0]
             hmm = line.split()[1]
-            contig = "_".join(gene.split("_")[:-1])
-            gene_num = int(gene.split("_")[-1])
             evalue = float(line.split()[-1])
 
             if hmm not in offtarget:
                 hits[gene].append(hmm)
                 evalues[gene][hmm] = evalue
-                locations[gene] = (contig, gene_num)
     f.close()
-    return hits, locations, evalues
+    return hits, evalues
 
 
 def create_gene_table(
@@ -184,8 +223,8 @@ def create_gene_table(
                 gene_table.append(
                     {
                         "Gene": hit,
-                        "Contig": "_".join(hit.split("_")[:-1]),
-                        "Gene Position": int(hit.split("_")[-1]),
+                        "Contig": gene_locations[hit][0],
+                        "Gene Position": gene_locations[hit][1],
                         "System Type": system_types[hmm][1],
                         "Gene type": system_types[hmm][0],
                         "HMM": hmm,
@@ -327,23 +366,39 @@ def read_blast(blast_file):
     return blast_hits
 
 
-def main(fasta, output_prefix, threads):
+def main(fasta, genbank, output_prefix, threads):
+
     metadata_file = os.path.dirname(__file__) + "/db/restriction_metadata.csv"
     metadata = pd.read_csv(metadata_file)
     system_types = {}
     for index, row in metadata.iterrows():
         system_types[row["Name"]] = (row["Enzyme_type"], row["System"])
 
-    prodigal_fasta = run_prodigal(output_prefix, fasta)
+    if genbank:
+        logging.info("Using Genbank file: {}".format(genbank))
+        if genbank.split(".")[-1] != 'gbk' and genbank.split(".")[-1] != 'gb' and genbank.split(".")[-1] != 'gbff':
+            logging.info("WARNING: is your -g genbank file really a genbank file? It does not end in .gb, .gbk, or .gbff")
+        prodigal_fasta, gene_locations = convert_genbank(output_prefix, genbank)
+    elif fasta:
+        if fasta.split(".")[-1] != 'fasta' and fasta.split(".")[-1] != 'fna' and fasta.split(".")[-1] != "fa":
+            logging.info("WARNING: is your -f fasta file really a genomic FASTA file? It does not end in .fa, .fna, or .fasta.")
+        logging.info("Calling prodigal on FASTA file: {}".format(fasta))
+        prodigal_fasta, gene_locations = run_prodigal(output_prefix, fasta)
+    else:
+        raise SystemExit(
+            "Error: You must supply either a WGS FASTA file with --fasta or a Genbank file with --genbank."
+        )
+
     hmmer_output = run_hmmer(output_prefix, prodigal_fasta, threads)
 
     resolved_hits = resolve_hits(hmmer_output, output_prefix)
-    gene_hits, gene_locations, evalues = parse_hmmer(resolved_hits)
+    gene_hits, evalues = parse_hmmer(resolved_hits)
 
     rm_gene_file = extract_genes(gene_hits, prodigal_fasta, output_prefix)
 
     blast_file = run_rebase_blast(rm_gene_file, output_prefix, threads)
     blast_hits = read_blast(blast_file)
+
 
     gene_table = create_gene_table(
         gene_hits, gene_locations, system_types, evalues, blast_hits
