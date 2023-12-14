@@ -91,6 +91,16 @@ Example BAM and FASTA files are available as:
 
 `./tests/test_data/test.bam` and `./tests/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna`.
 
+## Data
+
+FASTQ data (in the form of BAMs mapped to each reference) and POD5 data for the genome set from the MicrobeMod preprint can be downloaded with the commands below. Note that the raw2 POD5 data is substantial (213 GB total).
+
+```
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/mapped_bams/ .
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/reference_genomes/ .
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ .
+```
+
 # Step-by-step tutorial
 
 
