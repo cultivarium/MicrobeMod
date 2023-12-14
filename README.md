@@ -4,21 +4,33 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 
 ![Overview of the MicrobeMod pipeline](./PipelineOverview.png?raw=true")
 
-## External dependencies
+## Installing external dependencies
 
 Before installation, make sure the following external dependencies are available in your path. 
 
 ### Dependencies for `MicrobeMod annotate_rm`
 1. **Prodigal**, **BLAST**, and **HMMER**:
-These can most easily be installed with conda: `conda install -c bioconda prodigal hmmer blast`
 
-3. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
+2. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
+
+All of the above can easily be installed via conda: 
+
+```
+conda install -c bioconda prodigal hmmer blast cath-tools
+```
 
 ### Dependencies for `MicrobeMod call_methylation`
 
 3. **Modkit v0.2.2**: https://github.com/nanoporetech/modkit
   
 4. **STREME**: https://meme-suite.org/meme/doc/download.html
+
+Both can also be installed via conda, although you may run into errors on some systems: 
+
+```
+conda install -c bioconda meme
+conda install -c nanoporetech modkit
+```
 
 ## MicrobeMod installation
 ```
@@ -38,19 +50,29 @@ cd ../
 pip install .
 ```
 
-To confirm that you have the correct dependencies installed, run:
-
-```
-pytest -rP -k test_dependencies
-```
-
 To run all tests:
 
 ```
 pytest
 ```
 
-## Quick start
+### Optional: Docker installation
+
+Optionally, we provide a [Docker container](https://github.com/cultivarium/MicrobeMod/tree/main/Docker) which can be built to run MicrobeMod without installing the dependencies on the host system. To build it:
+
+```
+docker build -t microbemod -f Dockerfile .
+```
+
+And to subsequently run it:
+
+```
+docker run -v $PWD:/home/ubuntu/ -w /home/ubuntu/ microbemod -h
+```
+
+The `-v` option will make the local directory available to the docker instance, and files within this directory can be passed to the container and accessed via their local paths. 
+
+# Quick start
 
 If you have a reference mapped, indexed, and sorted BAM output from Dorado, to run `MicrobeMod call_methylation` with 10 threads:
 
@@ -175,6 +197,8 @@ The `MicrobeMod annotate_rm` pipeline is very simple: it just requires any genom
 MicrobeMod annotate_rm -f genome_reference.fasta -o genome_reference -t 10
 ```
 
+You can pass either a genome FASTA file with the `-f` argument, or a genbank file (e.g. downloaded from NCBI) with the `-g` argument. With `-f`, prodigal is run to call genes; `-g` will use gene loci from the GenBank file and skip gene calling.
+
 ### Interpreting RM gene output
 
 The following files are then created:
@@ -224,17 +248,14 @@ Description of columns:
 ## MicrobeMod call_methylation: all parameters
 
 ```
-usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA [-m METHYLATION_TYPES]
-                                   [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_strand_coverage MIN_STRAND_COVERAGE]
-                                   [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD]
-                                   [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
+usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA [-m METHYLATION_TYPES] [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_strand_coverage MIN_STRAND_COVERAGE]
+                                   [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD] [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
                                    [--percent_cutoff_streme PERCENT_CUTOFF_STREME] [-t THREADS]
 
 optional arguments:
   -h, --help            show this help message and exit
   -b BAM_FILE, --bam_file BAM_FILE
-                        BAM file of nanopore reads mapped to reference genome with the MM and ML tags
-                        preserved.
+                        BAM file of nanopore reads mapped to reference genome with the MM and ML tags preserved.
   -r REFERENCE_FASTA, --reference_fasta REFERENCE_FASTA
                         Reference genome FASTA file.
   -m METHYLATION_TYPES, --methylation_types METHYLATION_TYPES
@@ -244,17 +265,13 @@ optional arguments:
   -s STREME_PATH, --streme_path STREME_PATH
                         Path to streme executable.
   --min_strand_coverage MIN_STRAND_COVERAGE
-                        Minimum coverage required to call a site as methylated. Note this is per strand (so
-                        half of total coverage). Default: 10x
+                        Minimum coverage required to call a site as methylated. Note this is per strand (so half of total coverage). Default: 10x
   --methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD
-                        The minimum confidence score to call a base on a read as methylated. Passed to
-                        modkit. Default: 0.66
+                        The minimum confidence score to call a base on a read as methylated. Passed to modkit. Default: 0.66
   --percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF
-                        The fraction of methylated reads mapping to a site to count that site as methylated.
-                        Default: 0.66
+                        The fraction of methylated reads mapping to a site to count that site as methylated. Default: 0.66
   --percent_cutoff_streme PERCENT_CUTOFF_STREME
-                        The fraction of methylated reads mapping to a site to pass that site to motif
-                        calling. Default: 0.9
+                        The fraction of methylated reads mapping to a site to pass that site to motif calling. Default: 0.9
   -t THREADS, --threads THREADS
                         Number of threads to use. Only the first step (modkit) is multithreaded.
 ```
@@ -262,12 +279,14 @@ optional arguments:
 ## MicrobeMod annotate_rm: all parameters
 
 ```
-usage: MicrobeMod annotate_rm [-h] -f FASTA [-o OUTPUT_PREFIX] [-t THREADS]
+usage: MicrobeMod annotate_rm [-h] [-f FASTA] [-g GENBANK] [-o OUTPUT_PREFIX] [-t THREADS]
 
 optional arguments:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
-                        Prodigal FAA amino acid file (prodigal -a) for a genome.
+                        FASTA file for a genome. This option runs gene calling with prodigal. Either --fasta or --genbank is required.
+  -g GENBANK, --genbank GENBANK
+                        GenBank (gbk or gbff) file with coding regions annotated as CDS features. No gene calling is run. Either --fasta or --genbank is required.
   -o OUTPUT_PREFIX, --output_prefix OUTPUT_PREFIX
                         Output prefix.
   -t THREADS, --threads THREADS
