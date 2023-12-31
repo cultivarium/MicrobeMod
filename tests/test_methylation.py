@@ -11,27 +11,6 @@ from MicrobeMod.microbemod import assign_motifs
 from pandas.testing import assert_frame_equal
 
 
-def test_dependencies():
-    found = True
-    try:
-        subprocess.call(["modkit"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("modkit not found in path."))
-        found = False
-
-    try:
-        subprocess.call(["streme"])
-    except FileNotFoundError:
-        warnings.warn(
-            UserWarning(
-                "streme not found in path. You can optionally pass the streme_path parameter if it is not in your path."
-            )
-        )
-        found = False
-
-    assert found
-
-
 def test_read_modkit():
     min_coverage = 10
 

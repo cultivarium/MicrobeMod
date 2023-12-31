@@ -4,6 +4,8 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 
 ![Overview of the MicrobeMod pipeline](./PipelineOverview.png?raw=true")
 
+December 2023 update: MicrobeMod v1.0.3 is now compatible with the 4mC all-context model available through Rerio! 
+
 ## Data
 
 FASTQ data (in the form of BAMs mapped to each reference) and POD5 data for the genome set from the MicrobeMod preprint can be downloaded with the commands below. Note that the raw2 POD5 data is substantial (213 GB total).
@@ -14,16 +16,20 @@ aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/refere
 aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ .
 ```
 
-
-## External dependencies
+## Installing external dependencies
 
 Before installation, make sure the following external dependencies are available in your path.
 
 ### Dependencies for `MicrobeMod annotate_rm`
 1. **Prodigal**, **BLAST**, and **HMMER**:
-These can most easily be installed with conda: `conda install -c bioconda prodigal hmmer blast`
 
 2. **Cath-resolve-hits**: [https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10](https://github.com/UCLOrengoGroup/cath-tools/releases/tag/v0.16.10)
+
+All of the above can easily be installed via conda: 
+
+```
+conda install -c bioconda prodigal hmmer blast cath-tools
+```
 
 ### Dependencies for `MicrobeMod call_methylation`
 
@@ -32,6 +38,13 @@ You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
   
 4. **STREME**: https://meme-suite.org/meme/doc/download.html
 You can also install STREME via conda: `conda install -c bioconda meme`.
+
+Both can also be installed via conda, although you may run into errors on some systems: 
+
+```
+conda install -c bioconda meme
+conda install -c nanoporetech modkit
+```
 
 ## MicrobeMod installation
 ```
@@ -51,19 +64,29 @@ cd ../
 pip install .
 ```
 
-To confirm that you have the correct dependencies installed, run:
-
-```
-pytest -rP -k test_dependencies
-```
-
 To run all tests:
 
 ```
 pytest
 ```
 
-## Quick start
+### Optional: Docker installation
+
+Optionally, we provide a [Docker container](https://github.com/cultivarium/MicrobeMod/tree/main/Docker) which can be built to run MicrobeMod without installing the dependencies on the host system. To build it:
+
+```
+docker build -t microbemod -f Dockerfile .
+```
+
+And to subsequently run it:
+
+```
+docker run -v $PWD:/home/ubuntu/ -w /home/ubuntu/ microbemod -h
+```
+
+The `-v` option will make the local directory available to the docker instance, and files within this directory can be passed to the container and accessed via their local paths. 
+
+# Quick start
 
 If you have a reference mapped, indexed, and sorted BAM output from Dorado, to run `MicrobeMod call_methylation` with 10 threads:
 
@@ -82,6 +105,16 @@ Example BAM and FASTA files are available as:
 
 `./tests/test_data/test.bam` and `./tests/test_data/EcoliCVM05_GCF_000005845.2_ASM584v2_genomic.fna`.
 
+## Data
+
+FASTQ data (in the form of BAMs mapped to each reference) and POD5 data for the genome set from the MicrobeMod preprint can be downloaded with the commands below. Note that the raw2 POD5 data is substantial (213 GB total).
+
+```
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/mapped_bams/ .
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/reference_genomes/ .
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ .
+```
+
 # Step-by-step tutorial
 
 
@@ -89,17 +122,35 @@ Example BAM and FASTA files are available as:
 
 The first step for methylation motif identification is running [Dorado](https://github.com/nanoporetech/dorado) basecalling with modified basecalling models. 
 
-The command to do so should look like the below- the primary input is your directory of pod5 files, here named POD5_LIBRARY_NAME (if you have fast5, you can convert them using `pod5 convert fast5`: https://pod5-file-format.readthedocs.io/en/latest/docs/tools.html). 
-
-This command uses a R10.4.1 basecalling model (v4.2.0, the latest as of time of this commit), and passes two modified basecalling models as well, one for all context 5mC and one for all context 6mA.
+You can download models directly through dorado like so:
 
 ```
-dorado basecaller dna_r10.4.1_e8.2_400bps_sup@v4.2.0 ./POD5_LIBRARY_NAME/ --modified-bases-models dna_r10.4.1_e8.2_400bps_sup@v4.2.0_5mC@v2,dna_r10.4.1_e8.2_400bps_sup@v4.2.0_6mA@v3 > LIBRARY_NAME.bam
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.3.0
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.3.0_6mA@v2
 ```
+This downloads the latest (as of December 2023) super high accuracy basecalling model (v4.3.0) and the latest all context 6mA modified basecalling model.
+
+You can also include experimental models from Rerio. To get the all-context 5mC and 4mC model currently available through Rerio, run: 
+
+```
+git clone https://github.com/nanoporetech/rerio
+rerio/download_model.py --dorado ./rerio/dorado_models/res_dna_r10.4.1_e8.2_400bps_sup@v4.3.0_4mC_5mC*
+```
+
+At some point in the near future, this model will likely be available through Dorado directly.
+
+You can pass any set of basecalling models to Dorado for MicrobeMod. Instead of the experimental 4mC/5mC model above, you could also pass a 5mC/5hmC model currently directly available through Dorado. However, 4mC methylation is common in prokaryotes and therefore the 4mC and 5mC model is probably best.
+
+The command to run the basecalling should look like the below- the primary input is your directory of pod5 files, here named POD5_LIBRARY_NAME (if you have fast5, you can convert them using `pod5 convert fast5`: https://pod5-file-format.readthedocs.io/en/latest/docs/tools.html). 
+
+This command uses a R10.4.1 basecalling model, and passes two modified basecalling models as well, one for all context 4mC and 5mC and one for all context 6mA.
+
+```
+ dorado basecaller dna_r10.4.1_e8.2_400bps_sup@v4.3.0 [LIBRARY NAME] --modified-bases-models dna_r10.4.1_e8.2_400bps_sup@v4.3.0_6mA@v2,res_dna_r10.4.1_e8.2_400bps_sup@v4.3.0_4mC_5mC@v1  > [LIBRARY NAME].bam
+ ```
 
 The output is an unmapped BAM file with modified base information for each read.
 
-Note that first you will need to have downloaded each of these three models with `dorado download --model`. For example: `dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0`.
 
 ### Step 2: Mapping reads to the reference with minimap2
 
@@ -110,7 +161,7 @@ samtools fastq LIBRARY_NAME.bam -T MM,ML | minimap2 -t 14 --secondary=no -ax map
 samtools view -b | samtools sort -@ 10 -o LIBRARY_NAME.mapped.bam```
 ```
 
-The settings for `samtools fastq` are crucial: `-T MM,ML` includings the methylation tags in your fastq to pipe to minimap2.
+The settings for `samtools fastq` are crucial: `-T MM,ML` includings the methylation tags in your fastq to pipe to minimap2. Please note that you'll want samtools version v1.11 or later for this step in order to properly transfer the methylation tags.
  
 The settings for minimap2 here are crucial: this turns off secondary alignments (a strange minimap2 default behavior).
 
@@ -188,6 +239,8 @@ The `MicrobeMod annotate_rm` pipeline is very simple: it just requires any genom
 MicrobeMod annotate_rm -f genome_reference.fasta -o genome_reference -t 10
 ```
 
+You can pass either a genome FASTA file with the `-f` argument, or a genbank file (e.g. downloaded from NCBI) with the `-g` argument. With `-f`, prodigal is run to call genes; `-g` will use gene loci from the GenBank file and skip gene calling.
+
 ### Interpreting RM gene output
 
 The following files are then created:
@@ -237,17 +290,14 @@ Description of columns:
 ## MicrobeMod call_methylation: all parameters
 
 ```
-usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA [-m METHYLATION_TYPES]
-                                   [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_strand_coverage MIN_STRAND_COVERAGE]
-                                   [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD]
-                                   [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
+usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA [-m METHYLATION_TYPES] [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_strand_coverage MIN_STRAND_COVERAGE]
+                                   [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD] [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
                                    [--percent_cutoff_streme PERCENT_CUTOFF_STREME] [-t THREADS]
 
 optional arguments:
   -h, --help            show this help message and exit
   -b BAM_FILE, --bam_file BAM_FILE
-                        BAM file of nanopore reads mapped to reference genome with the MM and ML tags
-                        preserved.
+                        BAM file of nanopore reads mapped to reference genome with the MM and ML tags preserved.
   -r REFERENCE_FASTA, --reference_fasta REFERENCE_FASTA
                         Reference genome FASTA file.
   -m METHYLATION_TYPES, --methylation_types METHYLATION_TYPES
@@ -257,17 +307,13 @@ optional arguments:
   -s STREME_PATH, --streme_path STREME_PATH
                         Path to streme executable.
   --min_strand_coverage MIN_STRAND_COVERAGE
-                        Minimum coverage required to call a site as methylated. Note this is per strand (so
-                        half of total coverage). Default: 10x
+                        Minimum coverage required to call a site as methylated. Note this is per strand (so half of total coverage). Default: 10x
   --methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD
-                        The minimum confidence score to call a base on a read as methylated. Passed to
-                        modkit. Default: 0.66
+                        The minimum confidence score to call a base on a read as methylated. Passed to modkit. Default: 0.66
   --percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF
-                        The fraction of methylated reads mapping to a site to count that site as methylated.
-                        Default: 0.66
+                        The fraction of methylated reads mapping to a site to count that site as methylated. Default: 0.66
   --percent_cutoff_streme PERCENT_CUTOFF_STREME
-                        The fraction of methylated reads mapping to a site to pass that site to motif
-                        calling. Default: 0.9
+                        The fraction of methylated reads mapping to a site to pass that site to motif calling. Default: 0.9
   -t THREADS, --threads THREADS
                         Number of threads to use. Only the first step (modkit) is multithreaded.
 ```
@@ -275,12 +321,14 @@ optional arguments:
 ## MicrobeMod annotate_rm: all parameters
 
 ```
-usage: MicrobeMod annotate_rm [-h] -f FASTA [-o OUTPUT_PREFIX] [-t THREADS]
+usage: MicrobeMod annotate_rm [-h] [-f FASTA] [-g GENBANK] [-o OUTPUT_PREFIX] [-t THREADS]
 
 optional arguments:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
-                        Prodigal FAA amino acid file (prodigal -a) for a genome.
+                        FASTA file for a genome. This option runs gene calling with prodigal. Either --fasta or --genbank is required.
+  -g GENBANK, --genbank GENBANK
+                        GenBank (gbk or gbff) file with coding regions annotated as CDS features. No gene calling is run. Either --fasta or --genbank is required.
   -o OUTPUT_PREFIX, --output_prefix OUTPUT_PREFIX
                         Output prefix.
   -t THREADS, --threads THREADS

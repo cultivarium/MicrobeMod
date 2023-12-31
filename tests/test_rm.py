@@ -11,41 +11,8 @@ from MicrobeMod.restriction_modification import create_gene_table
 from pandas.testing import assert_frame_equal
 
 
-def test_dependencies():
-    found = True
-    try:
-        subprocess.call(["prodigal"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("prodigal not found in path."))
-        found = False
-
-    try:
-        subprocess.call(["hmmsearch"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("HMMER (hmmsearch) not found in path. "))
-        found = False
-
-    assert found
-
-    try:
-        subprocess.call(["blastp"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("BLASTP not found in path. "))
-        found = False
-
-    assert found
-
-    try:
-        subprocess.call(["cath-resolve-hits"])
-    except FileNotFoundError:
-        warnings.warn(UserWarning("cath-resolve-hits not found in path. "))
-        found = False
-
-    assert found
-
-
 def test_parse_hmmer():
-    gene_hits, gene_locations, evalues = parse_hmmer(
+    gene_hits, evalues = parse_hmmer(
         "./tests/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
     )
     expected = {
@@ -65,20 +32,6 @@ def test_parse_hmmer():
         ],
         "NC_000913.3_464": ["Type_II_REase06"],
     }
-    expected_locations = {
-        "NC_000913.3_1130": ("NC_000913.3", 1130),
-        "NC_000913.3_1932": ("NC_000913.3", 1932),
-        "NC_000913.3_2152": ("NC_000913.3", 2152),
-        "NC_000913.3_3194": ("NC_000913.3", 3194),
-        "NC_000913.3_3316": ("NC_000913.3", 3316),
-        "NC_000913.3_4262": ("NC_000913.3", 4262),
-        "NC_000913.3_4263": ("NC_000913.3", 4263),
-        "NC_000913.3_4265": ("NC_000913.3", 4265),
-        "NC_000913.3_4266": ("NC_000913.3", 4266),
-        "NC_000913.3_4267": ("NC_000913.3", 4267),
-        "NC_000913.3_4268": ("NC_000913.3", 4268),
-        "NC_000913.3_464": ("NC_000913.3", 464),
-    }
     expected_evalues = {
         "NC_000913.3_1130": {"Type_IV_05-RM_Type_IV__Type_IV_REases": 6.8e-27},
         "NC_000913.3_1932": {"Type_II_MTases_FAM_2": 1.2e-118},
@@ -95,7 +48,6 @@ def test_parse_hmmer():
     }
     assert (
         (gene_hits == expected)
-        and (gene_locations == expected_locations)
         and (evalues == expected_evalues)
     )
 
@@ -129,7 +81,23 @@ def test_create_gene_table():
     for index, row in metadata.iterrows():
         system_types[row["Name"]] = (row["Enzyme_type"], row["System"])
 
-    gene_hits, gene_locations, evalues = parse_hmmer(
+
+    gene_locations = {
+        "NC_000913.3_1130": ("NC_000913.3", 1130),
+        "NC_000913.3_1932": ("NC_000913.3", 1932),
+        "NC_000913.3_2152": ("NC_000913.3", 2152),
+        "NC_000913.3_3194": ("NC_000913.3", 3194),
+        "NC_000913.3_3316": ("NC_000913.3", 3316),
+        "NC_000913.3_4262": ("NC_000913.3", 4262),
+        "NC_000913.3_4263": ("NC_000913.3", 4263),
+        "NC_000913.3_4265": ("NC_000913.3", 4265),
+        "NC_000913.3_4266": ("NC_000913.3", 4266),
+        "NC_000913.3_4267": ("NC_000913.3", 4267),
+        "NC_000913.3_4268": ("NC_000913.3", 4268),
+        "NC_000913.3_464": ("NC_000913.3", 464),
+    }
+
+    gene_hits, evalues = parse_hmmer(
         "./tests/test_data/EcoliCVM05_GCF_000005845.resolved.hits"
     )
     blast_hits = read_blast("./tests/test_data/EcoliCVM05_GCF_000005845.blast")

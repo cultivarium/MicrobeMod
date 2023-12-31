@@ -11,14 +11,15 @@ __license__ = "MIT"
 __email__ = "alex@cultivarium.org"
 __status__ = "Development"
 
+from MicrobeMod import microbemod
+from MicrobeMod import restriction_modification
+from MicrobeMod._version import __version__
+
 import os
 import sys
 import argparse
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import MicrobeMod.microbemod as microbemod
-import MicrobeMod.restriction_modification as restriction_modification
-from MicrobeMod._version import __version__
 
 
 if __name__ == "__main__":
@@ -57,9 +58,9 @@ if __name__ == "__main__":
         "-m",
         "--methylation_types",
         action="store",
-        default="6mA,5mC",
+        default="6mA,5mC,4mC",
         required=False,
-        help="Methylation types to profile",
+        help="Methylation types to profile - a comma separated list. Default: 6mA,5mC,4mC,5hmC",
     )
     parser_mod.add_argument(
         "-o",
@@ -84,7 +85,8 @@ if __name__ == "__main__":
         default=10,
         required=False,
         type=int,
-        help="Minimum coverage required to call a site as methylated. Note this is per strand (so half of total coverage). Default: 10x",
+        help="Minimum coverage required to call a site as methylated. \
+            Note this is per strand (so half of total coverage). Default: 10x",
     )
     parser_mod.add_argument(
         "--methylation_confidence_threshold",
@@ -130,9 +132,21 @@ if __name__ == "__main__":
         "--fasta",
         action="store",
         default=None,
-        required=True,
-        help="Prodigal FAA amino acid file (prodigal -a) for a genome.",
+        required=False,
+        help="FASTA file for a genome. This option runs gene calling with prodigal. \
+            Either --fasta or --genbank is required.",
     )
+
+    parser_rm.add_argument(
+        "-g",
+        "--genbank",
+        action="store",
+        default=None,
+        required=False,
+        help="GenBank (gbk or gbff) file with coding regions annotated as CDS features. \
+            No gene calling is run. Either --fasta or --genbank is required.",
+    )
+
     parser_rm.add_argument(
         "-o",
         "--output_prefix",
@@ -145,14 +159,15 @@ if __name__ == "__main__":
         "-t", "--threads", action="store", default=12, help="Number of threads to use."
     )
 
-    parser.add_argument('--version', action='store_true', help='Show the version number and exit')
-    
+    parser.add_argument(
+        "--version", action="store_true", help="Show the version number and exit"
+    )
+
     args = parser.parse_args()
 
     if args.version:
         print(__version__)
         sys.exit()
-
 
     if args.subparser == "call_methylation":
         microbemod.main(
@@ -171,7 +186,10 @@ if __name__ == "__main__":
     elif args.subparser == "annotate_rm":
         if not args.output_prefix:
             args.output_prefix = args.fasta.split("/")[-1].split(".")[0]
-        restriction_modification.main(args.fasta, args.output_prefix, args.threads)
+
+        restriction_modification.main(
+            args.fasta, args.genbank, args.output_prefix, args.threads
+        )
 
     else:
         parser.print_help()

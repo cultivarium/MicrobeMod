@@ -161,3 +161,8 @@ cython_debug/
 
 # asp
 license-summary.csv
+
+
+# project
+/MicrobeMod/db
+/output
