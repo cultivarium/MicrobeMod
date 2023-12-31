@@ -4,9 +4,21 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 
 ![Overview of the MicrobeMod pipeline](./PipelineOverview.png?raw=true")
 
+December 2023 update: MicrobeMod v1.0.3 is now compatible with the 4mC all-context model available through Rerio! 
+
+## Data
+
+FASTQ data (in the form of BAMs mapped to each reference) and POD5 data for the genome set from the MicrobeMod preprint can be downloaded with the commands below. Note that the raw2 POD5 data is substantial (213 GB total).
+
+```
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/mapped_bams/ .
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/reference_genomes/ .
+aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ .
+```
+
 ## Installing external dependencies
 
-Before installation, make sure the following external dependencies are available in your path. 
+Before installation, make sure the following external dependencies are available in your path.
 
 ### Dependencies for `MicrobeMod annotate_rm`
 1. **Prodigal**, **BLAST**, and **HMMER**:
@@ -22,8 +34,10 @@ conda install -c bioconda prodigal hmmer blast cath-tools
 ### Dependencies for `MicrobeMod call_methylation`
 
 3. **Modkit v0.2.2**: https://github.com/nanoporetech/modkit
+You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
   
 4. **STREME**: https://meme-suite.org/meme/doc/download.html
+You can also install STREME via conda: `conda install -c bioconda meme`.
 
 Both can also be installed via conda, although you may run into errors on some systems: 
 
@@ -108,17 +122,35 @@ aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ 
 
 The first step for methylation motif identification is running [Dorado](https://github.com/nanoporetech/dorado) basecalling with modified basecalling models. 
 
-The command to do so should look like the below- the primary input is your directory of pod5 files, here named POD5_LIBRARY_NAME (if you have fast5, you can convert them using `pod5 convert fast5`: https://pod5-file-format.readthedocs.io/en/latest/docs/tools.html). 
-
-This command uses a R10.4.1 basecalling model (v4.2.0, the latest as of time of this commit), and passes two modified basecalling models as well, one for all context 5mC and one for all context 6mA.
+You can download models directly through dorado like so:
 
 ```
-dorado basecaller dna_r10.4.1_e8.2_400bps_sup@v4.2.0 ./POD5_LIBRARY_NAME/ --modified-bases-models dna_r10.4.1_e8.2_400bps_sup@v4.2.0_5mC@v2,dna_r10.4.1_e8.2_400bps_sup@v4.2.0_6mA@v3 > LIBRARY_NAME.bam
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.3.0
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.3.0_6mA@v2
 ```
+This downloads the latest (as of December 2023) super high accuracy basecalling model (v4.3.0) and the latest all context 6mA modified basecalling model.
+
+You can also include experimental models from Rerio. To get the all-context 5mC and 4mC model currently available through Rerio, run: 
+
+```
+git clone https://github.com/nanoporetech/rerio
+rerio/download_model.py --dorado ./rerio/dorado_models/res_dna_r10.4.1_e8.2_400bps_sup@v4.3.0_4mC_5mC*
+```
+
+At some point in the near future, this model will likely be available through Dorado directly.
+
+You can pass any set of basecalling models to Dorado for MicrobeMod. Instead of the experimental 4mC/5mC model above, you could also pass a 5mC/5hmC model currently directly available through Dorado. However, 4mC methylation is common in prokaryotes and therefore the 4mC and 5mC model is probably best.
+
+The command to run the basecalling should look like the below- the primary input is your directory of pod5 files, here named POD5_LIBRARY_NAME (if you have fast5, you can convert them using `pod5 convert fast5`: https://pod5-file-format.readthedocs.io/en/latest/docs/tools.html). 
+
+This command uses a R10.4.1 basecalling model, and passes two modified basecalling models as well, one for all context 4mC and 5mC and one for all context 6mA.
+
+```
+ dorado basecaller dna_r10.4.1_e8.2_400bps_sup@v4.3.0 [LIBRARY NAME] --modified-bases-models dna_r10.4.1_e8.2_400bps_sup@v4.3.0_6mA@v2,res_dna_r10.4.1_e8.2_400bps_sup@v4.3.0_4mC_5mC@v1  > [LIBRARY NAME].bam
+ ```
 
 The output is an unmapped BAM file with modified base information for each read.
 
-Note that first you will need to have downloaded each of these three models with `dorado download --model`. For example: `dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0`.
 
 ### Step 2: Mapping reads to the reference with minimap2
 
