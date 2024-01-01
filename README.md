@@ -2,6 +2,8 @@
 
 MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in nanopore sequencing.
 
+[Crits-Christoph, Alexander, Shinyoung Clair Kang, Henry H. Lee, and Nili Ostrov. "MicrobeMod: A computational toolkit for identifying prokaryotic methylation and restriction-modification with nanopore sequencing." bioRxiv (2023): 2023-11.](https://www.biorxiv.org/content/10.1101/2023.11.13.566931v1)
+
 ![Overview of the MicrobeMod pipeline](./PipelineOverview.png?raw=true")
 
 December 2023 update: MicrobeMod v1.0.3 is now compatible with the 4mC all-context model available through Rerio! 
