@@ -335,7 +335,7 @@ def assign_motifs(modkit_table, streme_output):
             ## Find motif occurrences in reference
             motif_len = len(motif_new)
 
-            for r, contig in REF.items():
+	            for r, contig in REF.items():
                 for site in nt_search(str(contig), motif_new)[1:]:
                     for i in range(site, site + motif_len):
                         motif_sites[r + ":" + str(i) + "+"] = motif_new
