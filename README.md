@@ -8,6 +8,8 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 
 December 2023 update: MicrobeMod v1.0.3 is now compatible with the 4mC all-context model available through Rerio! 
 
+July 2024 update: MicrobeMod v1.0.4 is now compatible with the 4mC_5mC all-context models available through Dorado 0.7+!
+
 ## Data
 
 FASTQ data (in the form of BAMs mapped to each reference) and POD5 data for the genome set from the MicrobeMod preprint can be downloaded with the commands below. Note that the raw2 POD5 data is substantial (213 GB total).
@@ -37,8 +39,10 @@ conda install -c bioconda prodigal hmmer blast cath-tools
 
 3. **Modkit v0.2.2**: https://github.com/nanoporetech/modkit
 You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
+
+*July 2024 update*: MicrobeMod is also compatible with Modkit 0.3 according to our testing.
   
-4. **STREME**: https://meme-suite.org/meme/doc/download.html
+5. **STREME**: https://meme-suite.org/meme/doc/download.html
 You can also install STREME via conda: `conda install -c bioconda meme`.
 
 Both can also be installed via conda, although you may run into errors on some systems: 
@@ -127,28 +131,20 @@ The first step for methylation motif identification is running [Dorado](https://
 You can download models directly through dorado like so:
 
 ```
-dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.3.0
-dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.3.0_6mA@v2
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v5.0.0
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v5.0.0_6mA@v1
+dorado download --model  dna_r10.4.1_e8.2_400bps_sup@v5.0.0_4mC_5mC@v1
 ```
-This downloads the latest (as of December 2023) super high accuracy basecalling model (v4.3.0) and the latest all context 6mA modified basecalling model.
+This downloads the latest (as of July 2024) super high accuracy basecalling model (v5.0.0) and the latest all context 6mA, 5mC, and 4mC modified basecalling models.
 
-You can also include experimental models from Rerio. To get the all-context 5mC and 4mC model currently available through Rerio, run: 
-
-```
-git clone https://github.com/nanoporetech/rerio
-rerio/download_model.py --dorado ./rerio/dorado_models/res_dna_r10.4.1_e8.2_400bps_sup@v4.3.0_4mC_5mC*
-```
-
-At some point in the near future, this model will likely be available through Dorado directly.
-
-You can pass any set of basecalling models to Dorado for MicrobeMod. Instead of the experimental 4mC/5mC model above, you could also pass a 5mC/5hmC model currently directly available through Dorado. However, 4mC methylation is common in prokaryotes and therefore the 4mC and 5mC model is probably best.
+You can pass any set of 4mC, 5mC, 6mA, and 5hmC basecalling models to Dorado for MicrobeMod. 
 
 The command to run the basecalling should look like the below- the primary input is your directory of pod5 files, here named POD5_LIBRARY_NAME (if you have fast5, you can convert them using `pod5 convert fast5`: https://pod5-file-format.readthedocs.io/en/latest/docs/tools.html). 
 
 This command uses a R10.4.1 basecalling model, and passes two modified basecalling models as well, one for all context 4mC and 5mC and one for all context 6mA.
 
 ```
- dorado basecaller dna_r10.4.1_e8.2_400bps_sup@v4.3.0 [LIBRARY NAME] --modified-bases-models dna_r10.4.1_e8.2_400bps_sup@v4.3.0_6mA@v2,res_dna_r10.4.1_e8.2_400bps_sup@v4.3.0_4mC_5mC@v1  > [LIBRARY NAME].bam
+ dorado basecaller dna_r10.4.1_e8.2_400bps_sup@v5.0.0 [LIBRARY NAME] --modified-bases-models dna_r10.4.1_e8.2_400bps_sup@v5.0.0_6mA@v1,dna_r10.4.1_e8.2_400bps_sup@v5.0.0_4mC_5mC@v1  > [LIBRARY NAME].bam
  ```
 
 The output is an unmapped BAM file with modified base information for each read.
