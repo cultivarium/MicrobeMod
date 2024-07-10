@@ -11,13 +11,12 @@ __license__ = "MIT"
 __email__ = "alex@cultivarium.org"
 __status__ = "Development"
 
-from MicrobeMod import microbemod
-from MicrobeMod import restriction_modification
-from MicrobeMod._version import __version__
-
+import argparse
 import os
 import sys
-import argparse
+
+from MicrobeMod import microbemod, restriction_modification
+from MicrobeMod._version import __version__
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -70,6 +69,16 @@ if __name__ == "__main__":
         required=False,
         help="Output prefix. Default is based on the BAM filename.",
     )
+
+    parser_mod.add_argument(
+        "-d",
+        "--output_directory",
+        action="store",
+        default=None,
+        required=False,
+        help="Output directory.",
+    )
+
     parser_mod.add_argument(
         "-s",
         "--streme_path",
@@ -138,6 +147,17 @@ if __name__ == "__main__":
     )
 
     parser_rm.add_argument(
+        "-a",
+        "--faa",
+        action="store",
+        default=None,
+        required=False,
+        help="FAA amino acid file of proteins- pre-existing output of prodigal -a, \
+            avoids having to re-run prodigal if you already ran.",
+    )
+
+
+    parser_rm.add_argument(
         "-g",
         "--genbank",
         action="store",
@@ -155,6 +175,16 @@ if __name__ == "__main__":
         required=False,
         help="Output prefix.",
     )
+
+    parser_rm.add_argument(
+        "-d",
+        "--output_directory",
+        action="store",
+        default=None,
+        required=False,
+        help="Output directory.",
+    )
+
     parser_rm.add_argument(
         "-t", "--threads", action="store", default=12, help="Number of threads to use."
     )
@@ -170,6 +200,23 @@ if __name__ == "__main__":
         sys.exit()
 
     if args.subparser == "call_methylation":
+        args.fasta = args.reference_fasta #bit hacky but for the best
+
+    if not args.fasta and not args.genbank:
+        raise SystemExit("You need to specify either a FASTA or GENBANK file.")
+
+    if not args.output_prefix:
+        if args.fasta:
+            args.output_prefix = args.fasta.split("/")[-1].split(".")[0]
+        elif args.genbank:
+            args.output_prefix = args.genbank.split("/")[-1].split(".")[0]
+
+    if args.output_directory:
+        if not os.path.exists(args.output_directory):
+            os.makedirs(args.output_directory)
+        args.output_prefix = os.path.join(args.output_directory, args.output_prefix)
+
+    if args.subparser == "call_methylation":
         microbemod.main(
             args.bam_file,
             args.reference_fasta,
@@ -183,12 +230,11 @@ if __name__ == "__main__":
             args.methylation_confidence_threshold,
         )
 
+
     elif args.subparser == "annotate_rm":
-        if not args.output_prefix:
-            args.output_prefix = args.fasta.split("/")[-1].split(".")[0]
 
         restriction_modification.main(
-            args.fasta, args.genbank, args.output_prefix, args.threads
+            args.fasta, args.faa, args.genbank, args.output_prefix, args.threads
         )
 
     else:

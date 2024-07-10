@@ -1,7 +1,7 @@
-import os
-import sys
 import logging
+import os
 import subprocess
+import sys
 from collections import defaultdict
 
 import pandas as pd
@@ -375,14 +375,22 @@ def read_blast(blast_file):
     return blast_hits
 
 
-def main(fasta, genbank, output_prefix, threads):
+def main(fasta, faa_file, genbank, output_prefix, threads):
     metadata_file = os.path.dirname(__file__) + "/db/restriction_metadata.csv"
     metadata = pd.read_csv(metadata_file)
     system_types = {}
     for _, row in metadata.iterrows():
         system_types[row["Name"]] = (row["Enzyme_type"], row["System"])
 
-    if genbank:
+    if faa_file:
+        prodigal_fasta = faa_file
+        gene_locations = {}  # values are (contig, gene_num)
+        for record in SeqIO.parse(output_prefix + ".faa", "fasta"):
+            gene_locations[record.id] = (
+                "_".join(record.id.split("_")[:-1]),
+                int(record.id.split("_")[-1]),
+            )
+    elif genbank:
         logging.info("Using Genbank file: %s", genbank)
         if (
             genbank.split(".")[-1] != "gbk"
@@ -390,7 +398,8 @@ def main(fasta, genbank, output_prefix, threads):
             and genbank.split(".")[-1] != "gbff"
         ):
             logging.info(
-                "WARNING: is your -g genbank file really a genbank file? It does not end in .gb, .gbk, or .gbff"
+                "WARNING: is your -g genbank file really a genbank file? \
+                    It does not end in .gb, .gbk, or .gbff"
             )
         prodigal_fasta, gene_locations = convert_genbank(output_prefix, genbank)
     elif fasta:
@@ -400,13 +409,15 @@ def main(fasta, genbank, output_prefix, threads):
             and fasta.split(".")[-1] != "fa"
         ):
             logging.info(
-                "WARNING: is your -f fasta file really a genomic FASTA file? It does not end in .fa, .fna, or .fasta."
+                "WARNING: is your -f fasta file really a genomic FASTA file? \
+                    It does not end in .fa, .fna, or .fasta."
             )
         logging.info("Calling prodigal on FASTA file: %s", fasta)
         prodigal_fasta, gene_locations = run_prodigal(output_prefix, fasta)
     else:
         raise SystemExit(
-            "Error: You must supply either a WGS FASTA file with --fasta or a Genbank file with --genbank."
+            "Error: You must supply either a WGS FASTA file with --fasta or a \
+                Genbank file with --genbank."
         )
 
     hmmer_output = run_hmmer(output_prefix, prodigal_fasta, threads)
