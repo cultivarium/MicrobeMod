@@ -1,8 +1,8 @@
-import os
-import sys
-import random
 import logging
+import os
+import random
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 import pandas as pd
@@ -327,7 +327,7 @@ def assign_motifs(modkit_table, streme_output):
                 + "\t"
                 + motif_new
                 + "\t"
-                + motif.get("npassing")
+                + motif.get("total_sites")
             )
             motifs.append(motif_new)
             motif_new_to_original[motif_new] = motif.get("id")
@@ -353,7 +353,6 @@ def assign_motifs(modkit_table, streme_output):
     modkit_table2["motif_raw"] = modkit_table2["motif"].map(motif_new_to_original)
 
     return modkit_table2
-
 
 def make_motif_table(modkit_table):
     """Creates the motif table summarizing the data for each motif.
