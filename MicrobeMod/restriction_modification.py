@@ -246,6 +246,10 @@ def create_gene_table(
                 )
 
     gene_table = pd.DataFrame(gene_table)
+
+    if gene_table.shape[0] == 0: # if empty
+        return gene_table
+
     gene_table = gene_table.sort_values(["Contig", "Gene Position"], ascending=True)
 
     ## Assign operons
@@ -385,7 +389,7 @@ def main(fasta, faa_file, genbank, output_prefix, threads):
     if faa_file:
         prodigal_fasta = faa_file
         gene_locations = {}  # values are (contig, gene_num)
-        for record in SeqIO.parse(output_prefix + ".faa", "fasta"):
+        for record in SeqIO.parse(faa_file, "fasta"):
             gene_locations[record.id] = (
                 "_".join(record.id.split("_")[:-1]),
                 int(record.id.split("_")[-1]),
