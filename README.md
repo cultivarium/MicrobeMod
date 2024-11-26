@@ -15,9 +15,9 @@ July 2024 update: MicrobeMod v1.0.4 is now compatible with the 4mC_5mC all-conte
 FASTQ data (in the form of BAMs mapped to each reference) and POD5 data for the genome set from the MicrobeMod preprint can be downloaded with the commands below. Note that the raw2 POD5 data is substantial (213 GB total).
 
 ```
-aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/mapped_bams/ .
-aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/reference_genomes/ .
-aws s3 cp --recursive s3://cultivarium-sequencing/MICROBEMOD-DATA-NOV2023/pod5/ .
+aws s3 cp --recursive s3://cultivarium-publication-data/MICROBEMOD-DATA-NOV2023/mapped_bams/ .
+aws s3 cp --recursive s3://cultivarium-publication-data/MICROBEMOD-DATA-NOV2023/reference_genomes/ .
+aws s3 cp --recursive s3://cultivarium-publication-data/MICROBEMOD-DATA-NOV2023/pod5/ .
 ```
 
 ## Installing external dependencies
