@@ -3,7 +3,7 @@ import subprocess
 
 print("Downloading database from FigShare...")
 
-cmd = "wget https://figshare.com/ndownloader/files/51880868 -O db.tar.gz"
+cmd = "wget https://figshare.com/ndownloader/files/55209713 -O db.tar.gz"
 output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode()
 
 print("Extracting database")
