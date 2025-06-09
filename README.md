@@ -253,22 +253,21 @@ test.rm.genes.tsv: Tabular output describing RM genes
 
 The `*.rm.genes.tsv` file will look something like this:
 
-| Operon       | Gene                                   | System Type | Gene type | HMM                                   | Evalue   | REBASE homolog      | Homolog identity(%) | Homolog methylation | Homolog motif |
-|--------------|----------------------------------------|-------------|-----------|---------------------------------------|----------|---------------------|---------------------|---------------------|---------------|
-| RM Operon #1 | NODE_3_length_585136_cov_9.720044_91   | RM_Type_IIG | IIG       | Type_IIG_3                            | 3.7e-182 | Bfr4856TORF10500P   | 100.0               | m6A                 | GANGGAG       |
-| RM Operon #2 | NODE_3_length_585136_cov_9.720044_276  | RM_Type_I   | RE        | Type_I_REases_FAM_2.einsi_trimmed     | 7.2e-27  | Bfr14ORF3855P       | 100.0               |                     |               |
-| RM Operon #2 | NODE_3_length_585136_cov_9.720044_277  | RM_Type_I   | MT        | Type_I_MTases_FAM_1                   | 1.1e-164 | M.Bsp2737ORF11960P  | 100.0               | m6A                 |               |
-| RM Operon #2 | NODE_3_length_585136_cov_9.720044_280  | RM_Type_I   | SP        | Type_I_S_52                           | 8.9e-32  | S.Bfr1512ORF18655P  | 100.0               |                     |               |
-| RM Operon #3 | NODE_4_length_554179_cov_10.591782_322 | RM_Type_II  | RE        | Type_II_REase09                       | 7.1e-17  | Bfr4856TORF22075P   | 100.0               |                     | ATGCAT        |
-| RM Operon #3 | NODE_4_length_554179_cov_10.591782_323 | RM_Type_II  | MT        | Type_II_MTases_FAM_1                  | 7.3e-89  | M.Bfr4856TORF22075P | 100.0               |                     | ATGCAT        |
-| RM Operon #4 | NODE_5_length_489011_cov_9.441508_131  | RM_Type_IV  | RE        | Type_IV_21-RM_Type_IV__Type_IV_REases | 3.8e-113 |                     |                     |                     |               |
-| RM Operon #5 | NODE_6_length_416426_cov_9.438798_313  | RM_Type_I   | RE        | Type_I_REases_FAM_0.einsi_trimmed     | 5.5e-199 | Bfr4856TORF13485P   | 100.0               |                     |               |
-| RM Operon #5 | NODE_6_length_416426_cov_9.438798_311  | RM_Type_I   | MT        | Type_I_MTases_FAM_0                   | 1.5e-172 | M.Bfr4856TORF13485P | 100.0               | m6A                 |               |
-| RM Operon #5 | NODE_6_length_416426_cov_9.438798_310  | RM_Type_I   | SP        | Type_I_S_51                           | 9.9e-53  | S1.Bfr1512ORF16830P | 100.0               |                     | GACNNNNNGRTY  |
-| RM Operon #5 | NODE_6_length_416426_cov_9.438798_307  | RM_Type_I   | SP        | Type_I_S_01                           | 1.3e-35  | S4.Bfr1512ORF16830P | 100.0               |                     |               |
-| Singleton #1 | NODE_17_length_27965_cov_10.731518_5   | RM_Type_II  | RE        | Type_II_REase06                       | 4.2e-09  |                     |                     |                     |               |
-| Singleton #2 | NODE_1_length_700861_cov_9.167701_172  | RM_Type_II  | MT        | Type_II_MTases_FAM_33                 | 1e-12    |                     |                     |                     |               |
-| Singleton #3 | NODE_3_length_585136_cov_9.720044_324  | RM_Type_II  | MT        | Type_II_MTases_FAM_5                  | 5.7e-05  | M.Hgu7ORFBP         | 100.0               |                     |               |
+| Operon | Gene | System Type | Gene type | HMM | Evalue | Predicted methylation | Prediction confidence | REBASE homolog | Homolog identity(%) | Homolog methylation | Homolog motif |
+| --- |  --- |  --- |  --- |  --- |  --- |  --- |  --- |  --- |  --- |  --- |  --- | 
+| RM Operon #1 | NC_000913.3_1130 | RM_Type_IV | RE | Type_IV_05-RM_Type_IV__Type_IV_REases | 6.8e-27 | cuts m5C |  | SsoSE61ORF22640P | 100.0 |  | YCGR |
+| RM Operon #2 | NC_000913.3_4263 | RM_Type_IV | RE | FAM_1-RM_Type_IV__Type_IV_REases | 4e-149 |  |  | Eco1655dMcrBCP_(Eco1655dMcrBP) | 100.0 |  |  |
+| RM Operon #2 | NC_000913.3_4268 | RM_Type_IV | RE | FAM_0-RM_Type_IV__Type_IV_REases | 2.1e-76 | cuts m6A+m5C |  | EcoZK126MrrP | 100.0 |  |  |
+| RM Operon #2 | NC_000913.3_4266 | RM_Type_I | MT | Type_I_MTases_FAM_2 | 4.7e-252 | m6A | 0.999235035379614 | M.SenHNK130ORF17125P | 100.0 | m6A | AACNNNNNNGTGC |
+| RM Operon #2 | NC_000913.3_4267 | RM_Type_I | RE | Type_I_REases_FAM_2.einsi_trimmed | 0.0 |  |  | Msa17ORFC2P | 100.0 |  | AACNNNNNNGTGC |
+| RM Operon #2 | NC_000913.3_4265 | RM_Type_I | SP | Type_I_S_52 | 1.8e-81 |  |  | S.SenHNK130ORF17125P | 100.0 |  | AACNNNNNNGTGC |
+| RM Operon #2 | NC_000913.3_4262 | RM_Type_IV | RE | FAM_2-RM_Type_IV__Type_IV_REases | 8.6e-137 |  |  | SenHNK130McrBCP_(SenHNK130McrCP) | 100.0 |  |  |
+| Singleton #1 | NC_000913.3_464 | RM_Type_II | RE | Type_II_REase06 | 7.9e-10 |  |  |  |  |  |  |
+| Singleton #2 | NC_000913.3_1932 | RM_Type_II | MT | Type_II_MTases_FAM_2 | 1.2e-118 | m5C | 0.988996200126663 | M.SflLIN6DcmP | 100.0 | m5C | CCWGG |
+| Singleton #3 | NC_000913.3_2152 | RM_Type_I | RE | Type_I_REases_FAM_2.einsi_trimmed | 5.1e-31 |  |  |  |  |  |  |
+| Singleton #4 | NC_000913.3_3194 | RM_Type_II | MT | Type_II_MTases_FAM_1 | 5.1e-93 |  |  | M.Eco4792LORF2734P | 100.0 |  | ATGCAT |
+| Singleton #5 | NC_000913.3_3316 | RM_Type_II | MT | Type_II_MTases_FAM_4 | 1.4e-87 | m6A | 0.961999489926039 | M.UbaC1152DamP | 100.0 | m6A | GATC |
+
 
 Each line describes an individual gene: Genes are grouped by whether they are in an "operon" (complete RM system - for Type IV and Type IIG this is just one gene) or are a "singleton" (methyltransferase or RE without a pair). 
 
@@ -279,6 +278,8 @@ Description of columns:
 4. Gene type: The number of gene (either MT, SP, RE, or IIG)
 5. HMM: The exact HMM that hit that gene.
 6. Evalue: The Evalue of the HMM hit.
+7. Predicted methylation: The type of methylation a methyltransferase will methylate, or that a methyl-directed restriction enzyme will target. Predicted by HMM homology to enzymes annotated by REBASE.
+8. Prediction confidence: This is the predicted specificity of the HMM for a given methylation type. 
 7. REBASE homolog: closest homolog in the REBASE dataset.
 8. Homology identity: Amino acid percent identity of closest hit.
 9. Homolog methylation: The methylation type of the closest homolog, if known.
@@ -319,16 +320,19 @@ optional arguments:
 ## MicrobeMod annotate_rm: all parameters
 
 ```
-usage: MicrobeMod annotate_rm [-h] [-f FASTA] [-g GENBANK] [-o OUTPUT_PREFIX] [-t THREADS]
+usage: MicrobeMod annotate_rm [-h] [-f FASTA] [-a FAA] [-g GENBANK] [-o OUTPUT_PREFIX] [-d OUTPUT_DIRECTORY] [-t THREADS]
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
                         FASTA file for a genome. This option runs gene calling with prodigal. Either --fasta or --genbank is required.
+  -a FAA, --faa FAA     FAA amino acid file of proteins- pre-existing output of prodigal -a, avoids having to re-run prodigal if you already ran.
   -g GENBANK, --genbank GENBANK
                         GenBank (gbk or gbff) file with coding regions annotated as CDS features. No gene calling is run. Either --fasta or --genbank is required.
   -o OUTPUT_PREFIX, --output_prefix OUTPUT_PREFIX
                         Output prefix.
+  -d OUTPUT_DIRECTORY, --output_directory OUTPUT_DIRECTORY
+                        Output directory.
   -t THREADS, --threads THREADS
                         Number of threads to use.
 ```

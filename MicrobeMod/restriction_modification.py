@@ -203,7 +203,7 @@ def create_gene_table(
     Args:
             hits: a defaultdictionary where keys are genes and values are lists of their HMM names.
             gene_locations: a dictionary where keys are genes and values are tuples of (contig, gene number).
-            system_types: Dictionary of HMMs to RM system types
+            system_types: Dictionary of HMMs to RM system types and their metadata.
             evalues: a defaultdictionary where keys are genes, values are dictionaries with HMMs as keys and values as evalues.
             blast_hits: dictionary of genes-> blast hits, from read_blast()
             gene_window: the window size to use to call operons.
@@ -238,10 +238,13 @@ def create_gene_table(
                         "Gene type": system_types[hmm][0],
                         "HMM": hmm,
                         "Evalue": evalues[hit][hmm],
+                        "Predicted methylation": system_types[hmm][2],
+                        "Prediction confidence": system_types[hmm][3],
                         "REBASE homolog": best_blast,
                         "Homolog identity(%)": blast_pid,
                         "Homolog methylation": meth_type,
                         "Homolog motif": motif,
+
                     }
                 )
 
@@ -308,7 +311,7 @@ def create_gene_table(
                     found_MT = True
                 if "RE" in genetype:
                     found_RE = True
-                if "RM_Type_IV" in genetype or "IIG" in genetype:
+                if "RM_Type_IV" in genetype or "IIG" in genetype or 'IIM' in genetype:
                     found_RE_IV = True
 
             if found_RE_IV or (found_MT and found_RE):
@@ -384,7 +387,7 @@ def main(fasta, faa_file, genbank, output_prefix, threads):
     metadata = pd.read_csv(metadata_file)
     system_types = {}
     for _, row in metadata.iterrows():
-        system_types[row["Name"]] = (row["Enzyme_type"], row["System"])
+        system_types[row["Name"]] = (row["Enzyme_type"], row["System"], row["Methylation_type"], row["Methylation_type_specificity"])
 
     if faa_file:
         prodigal_fasta = faa_file
