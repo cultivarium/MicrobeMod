@@ -156,7 +156,7 @@ The next step is to map your basecalled reads, *including their methylation meta
 
 ```
 samtools fastq LIBRARY_NAME.bam -T MM,ML | minimap2 -t 14 --secondary=no -ax map-ont -y reference_genomes.fna -| \
-samtools view -b | samtools sort -@ 10 -o LIBRARY_NAME.mapped.bam```
+samtools view -b | samtools sort -@ 10 -o LIBRARY_NAME.mapped.bam
 ```
 
 The settings for `samtools fastq` are crucial: `-T MM,ML` includings the methylation tags in your fastq to pipe to minimap2. Please note that you'll want samtools version v1.11 or later for this step in order to properly transfer the methylation tags.
