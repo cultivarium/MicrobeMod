@@ -84,8 +84,13 @@ pytest
 
 ### Optional: Docker installation
 
-Optionally, we provide a [Docker container](https://github.com/cultivarium/MicrobeMod/tree/main/Docker) which can be built to run MicrobeMod without installing the dependencies on the host system. To build it:
+Optionally, we provide a [Docker container](https://github.com/cultivarium/MicrobeMod/tree/main/Docker) which can be built to run MicrobeMod without installing the dependencies on the host system. To build it, first download the microbemod database from FigShare and move it into the ./Docker/` directory:
+```
+mv microbemod_db_v3.tar.gz ./Docker/
+cd Docker
+```
 
+Then build the Docker image:
 ```
 docker build -t microbemod -f Dockerfile .
 ```
