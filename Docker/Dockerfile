@@ -24,14 +24,7 @@ RUN conda install -c conda-forge -c bioconda -y blast hmmer prodigal cath-tools
 
 # Setup microbemod
 RUN git clone https://github.com/cultivarium/MicrobeMod/
-
-# FigShare now blocks programmatic downloads (AWS WAF challenge), so download_db.py
-# fails inside the build. Instead, fetch the tarball manually in a browser from
-# https://figshare.com/ndownloader/files/55209713, place it next to this Dockerfile
-# as microbemod_db_v3.tar.gz, then COPY it in here.
-COPY microbemod_db_v3.tar.gz /MicrobeMod/MicrobeMod/
-RUN cd MicrobeMod/MicrobeMod && tar -xvf microbemod_db_v3.tar.gz && rm microbemod_db_v3.tar.gz
-
+RUN cd MicrobeMod/MicrobeMod && python download_db.py
 RUN cd MicrobeMod && pip install .
 
 
