@@ -1,3 +1,4 @@
+import http.client
 import shutil
 import sys
 import tarfile
@@ -11,6 +12,7 @@ DB_TARBALL = Path("db.tar.gz")
 USER_AGENT = "Mozilla/5.0"
 MAX_ATTEMPTS = 30
 RETRY_WAIT_SECONDS = 20
+DOWNLOAD_TIMEOUT_SECONDS = 60
 
 
 def download_database():
@@ -19,13 +21,15 @@ def download_database():
     request = urllib.request.Request(URL, headers={"User-Agent": USER_AGENT})
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            with urllib.request.urlopen(request) as response, DB_TARBALL.open("wb") as handle:
+            with urllib.request.urlopen(
+                request, timeout=DOWNLOAD_TIMEOUT_SECONDS
+            ) as response, DB_TARBALL.open("wb") as handle:
                 shutil.copyfileobj(response, handle)
             if tarfile.is_tarfile(DB_TARBALL):
                 print(f"Database downloaded (attempt {attempt}).")
                 return
             reason = "response was not a valid tarball (FigShare may be staging the file)"
-        except urllib.error.URLError as err:
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as err:
             reason = str(err)
         if attempt < MAX_ATTEMPTS:
             print(
