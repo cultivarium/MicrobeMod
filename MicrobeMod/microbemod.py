@@ -20,7 +20,10 @@ logging.basicConfig(
 METHYLATION_TYPES = {"6mA": "a", "5mC": "m", "4mC": "21839", "5hmC": "h"}
 METHYLATION_TYPES_REV = {"a": "6mA", "m": "5mC", "21839": "4mC", "h": "5hmC"}
 REF = {}
-WINDOW_SIZE = 12
+# 13 -> get_seq yields 26 bp windows with the methylated base at index 13,
+# matching the python caller's SEQ_LEN=26 / METH_CENTER=13 convention (and the
+# motif_caller benchmark). STREME is unaffected by the extra 2 bp of flank.
+WINDOW_SIZE = 13
 MIN_EVALUE = 0.1
 MOTIF_FREQ_CUTOFF = (
     0.8  # If a nucleotide isn't 80% of sites in a motif, converted to an N
@@ -70,7 +73,7 @@ def run_modkit(
     low_modkit_file = prefix + "_low.bed"
 
     ## Run first iteration
-    cmd = "modkit pileup -t {threads} {bam} {output} -r {fasta} --only-tabs --filter-threshold {threshold}"
+    cmd = "modkit pileup -t {threads} {bam} {output} -r {fasta} --suppress-progress --filter-threshold {threshold}"
     cmd = cmd.format(
         threads=threads,
         bam=bamfile,
@@ -84,6 +87,31 @@ def run_modkit(
     return low_modkit_file
 
 
+def _read_bedmethyl(path):
+    """Read a modkit bedMethyl into the canonical 18-column frame, tolerant of
+    the trailing-delimiter change across modkit versions.
+
+    The 9 standard BED columns are always tab-delimited. The 9 trailing
+    methylation-stat columns are tab-delimited in some modkit versions
+    (18 tab fields total) but space-delimited in newer ones (10 tab fields,
+    with the stats packed into the last field). Reading with sep="\\t" and,
+    when that yields fewer than 18 columns, splitting the packed final field on
+    whitespace recovers the same 18 columns either way. The RGB colour field
+    (e.g. "255,0,0") is comma-joined, so it is never split. The re-split stat
+    columns are coerced back to numeric so downstream arithmetic stays numeric
+    (otherwise "0" + "30" would string-concatenate).
+    """
+    d = pd.read_csv(path, sep="\t", header=None)
+    if d.shape[1] >= 18:
+        return d                                   # already all-tab (fast path)
+    head = d.iloc[:, :-1].reset_index(drop=True)
+    tail = d.iloc[:, -1].astype(str).str.split(expand=True)
+    tail = tail.apply(pd.to_numeric, errors="coerce").reset_index(drop=True)
+    out = pd.concat([head, tail], axis=1)
+    out.columns = range(out.shape[1])
+    return out
+
+
 def read_modkit(low_modkit_output, min_coverage=10):
     """Read the output of Modkit
     Args:
@@ -94,7 +122,7 @@ def read_modkit(low_modkit_output, min_coverage=10):
     """
 
     logging.info("Reading Modkit table...")
-    d = pd.read_csv(low_modkit_output, sep="\t", header=None)
+    d = _read_bedmethyl(low_modkit_output)
 
     ## Rename columns
     d.columns = [
@@ -496,6 +524,7 @@ def main(
     percent_cutoff=0.66,
     percent_cutoff_streme=0.9,
     methylation_confidence_threshold=0.6,
+    motif_caller="python",
 ):
     if (
         percent_cutoff > 1
@@ -528,7 +557,11 @@ def main(
     ### Step 2: Process modkit table
     modkit_table = read_modkit(low_modkit_output, min_coverage)
 
-    # Step 3: For each methylation, create FASTA and run STREME
+    # Step 3: For each methylation, create FASTA and call motifs
+    logging.info("Motif caller: %s", motif_caller)
+    reference_fasta = fasta_file  # preserve genome path (loop var below is the pos FASTA)
+    if motif_caller == "python":
+        from MicrobeMod import microbe_motif
     i = 0
     final_table = None
     final_motif_table = None
@@ -538,17 +571,28 @@ def main(
 
         modkit_table_tmp = modkit_table[modkit_table.Modification == methylation]
 
-        # Write sites to FASTA files
-        fasta_file = write_to_fasta(
+        # Write methylated-site windows (and a genomic background) to FASTA
+        pos_fasta = write_to_fasta(
             modkit_table_tmp,
             output_prefix,
             methylation,
             percent_cutoff_streme,
             min_coverage,
         )
-        # Run STREME
-        if fasta_file:
-            streme_out = run_streme(fasta_file, streme_path)
+        # Call motifs with the selected engine. Both write a STREME-format
+        # streme.xml that assign_motifs() parses, so downstream is identical.
+        if pos_fasta:
+            if motif_caller == "python":
+                out_dir = pos_fasta.split(".fasta")[0] + "_microbe_motif"
+                streme_out = microbe_motif.run_from_fastas(
+                    pos_fasta,
+                    pos_fasta.replace("_pos.fasta", "_control.fasta"),
+                    out_dir,
+                    output_type="xml",
+                    genome_path=reference_fasta,
+                )
+            else:
+                streme_out = run_streme(pos_fasta, streme_path)
         else:
             streme_out = None
 

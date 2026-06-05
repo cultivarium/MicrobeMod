@@ -1,0 +1,348 @@
+# How `motif_caller.py` works
+
+This is a Python port of the Rust `motif_caller`, which is itself a drop-in
+replacement for STREME inside MicrobeMod. It's an **anchor-free, iterative
+methylation motif finder** for bacterial restriction-modification systems.
+
+The pipeline takes two FASTA files:
+- `pos.fa` — fixed-width windows (default 26 bp) **centered on the methylated
+  base** of every detected modification call in a sample.
+- `neg.fa` — same-width windows from random unmethylated genome positions
+  (the "control" or background).
+
+…and returns a list of IUPAC motifs (e.g. `GATC`, `RAATTY`, `CCAGNNNNNCTGG`)
+that are statistically over-represented in `pos.fa` vs `neg.fa`. The output is
+written as a `streme.xml` file that downstream MicrobeMod tooling parses.
+
+---
+
+## High-level algorithm
+
+The finder is **iterative**. In each iteration:
+
+1. Pick the most-enriched canonical k-mer (the **seed**) across all `(k, start)`
+   windows in the active set of positive sequences.
+2. Filter the active set to sequences containing that seed at the seed window.
+3. Extend the seed bounds outward using per-position **information content (IC)**.
+4. Optionally search for a **bipartite far-half** separated by a spacer (Type I
+   R-M motifs).
+5. Build the full IUPAC consensus.
+6. Run garbage-quality gates (specificity, neg-match cap, enrichment ratio,
+   raw-rate gate, Fisher's exact e-value).
+7. **Mask** all sequences matching the emitted motif and repeat.
+
+The loop stops when no seed scores above the floor or `MAX_MOTIFS` (25) is
+reached. After the loop, two **post-processing** passes:
+
+- **Dedup** — collapse near-duplicate variants (same motif emitted twice with
+  slight seed-bias differences, or a motif and its reverse complement).
+- **Refine** — re-derive each motif's consensus from *all* centered matches in
+  the original `pos.fa` (not just the seed-filtered subset), allow optional
+  flank extension by up to 2 positions per side, trim borderline IUPAC codes.
+
+---
+
+## Section-by-section walk-through
+
+### Constants (top of file)
+
+The behavior is controlled by ~25 thresholds. The high-leverage ones:
+
+| name | value | meaning |
+|------|-------|---------|
+| `SEQ_LEN` | 26 | Width of pos.fa windows. METH_CENTER = 13. |
+| `MIN_W`, `MAX_W` | 4, 15 | Min/max width of the close half of a motif. |
+| `IC_THRESH` | 0.7 | Per-position IC (bits) needed to extend the seed. |
+| `FREQ_CUTOFF` | 0.8 | Top-1 / top-2 cumulative frequency to call a 1-letter or 2-letter IUPAC code. |
+| `FREQ_CUTOFF_TRI` | 0.95 | Top-3 cumulative frequency to call a 3-letter code (B/D/H/V). |
+| `MIN_MOTIF_SITES` | 10 | Minimum positive sequences containing the motif to report it. |
+| `MAX_NEG_MATCH_RATE` | 0.2 | Fraction of negatives the motif may match before being rejected as garbage. |
+| `MIN_ENRICH_RATIO` | 3.0 | Minimum pos_rate / neg_rate. Rejects "genome-frequency" motifs. |
+| `MAX_LOG10_EVAL` | -1.0 | Fisher's exact e-value cutoff (e ≤ 0.1). |
+| `RESCUE_ACTIVE_FRAC` | 0.03 | Active-set fraction floor for "rescue mode" — keeps the loop going on dense (multi-motif) BEDs. |
+
+### `load_fasta(path)`
+
+Reads the FASTA and returns a `[n_seqs, SEQ_LEN]` `uint8` numpy array. Each
+base is encoded as `A=0, C=1, G=2, T=3, N/other=4`. Sequences shorter than
+`SEQ_LEN` are right-padded with `4` (which is treated as N elsewhere).
+
+### `freq_matrix(seqs, start, end)`
+
+Returns a `[width, 4]` matrix of base frequencies over `[start, end)`.
+Sequences with any `N` (encoded `4`) inside the window are excluded — they
+contribute no counts. Frequencies use a **Laplace pseudocount** (`PSEUDO=0.5`)
+so positions that never see a particular base still get a small probability.
+
+### `ic(pos, bg)` — information content
+
+Bits of information at one position vs a background distribution:
+```
+IC(pos) = Σ_i pos[i] * log2(pos[i] / bg[i])
+```
+Used in two places: (1) deciding whether to extend the seed boundary outward
+(Step 3), and (2) discriminating the strand-collision split branch (Step 2.5).
+
+### Fisher's exact test (`fisher_log10_pvalue`)
+
+One-tailed hypergeometric p-value: given `(a, b, c, d) =
+(pos_match, pos_nomatch, neg_match, neg_nomatch)`, compute
+`P(X ≥ a)` under the null that pos_rate = neg_rate. Computed in log space
+(via log-binomials) so it's numerically stable for tiny p-values, then
+converted to log10. The motif is reported only if
+`log10_e = log10_p + log10(N_TESTS) ≤ -1.0` (i.e., e-value ≤ 0.1, after
+Bonferroni correction for `N_TESTS=25`).
+
+### `iupac_char(freq)` — the consensus rule
+
+Maps a 4-base frequency vector to a single IUPAC character:
+
+- top1 ≥ 0.8 → `A` / `C` / `G` / `T`
+- otherwise top-1 + top-2 ≥ 0.8 → 2-letter code (`M=AC`, `R=AG`, `W=AT`,
+  `S=CG`, `Y=CT`, `K=GT`)
+- otherwise top1+top2+top3 ≥ 0.95 → 3-letter code (`B=¬A`, `D=¬C`, `H=¬G`,
+  `V=¬T`)
+- otherwise → `N`
+
+The 3-letter codes are conservatively gated (≥0.95, not ≥0.8) because they
+have to "buy" a missing base being clearly depleted vs uniform.
+
+### `consensus_seed_aware(...)` — seed N-recovery
+
+Identical to `iupac_char` for non-seed positions. For positions **inside the
+seed window**, if the **active-set** (pre-filter) top-base frequency is below
+`SEED_ACTIVE_N_THRESH=0.265`, we override to `N`. Reason: the seed-based
+filter artificially fixes the base at seed positions; without this guard, a
+position that's actually `N` in the underlying biology gets called as a
+specific base because every filtered sequence has the seed there.
+
+### IUPAC string algebra (`iupac_levenshtein`, `specific_overlap`, etc.)
+
+Used in dedup. The key trick is that each IUPAC character is a 4-bit set
+(`A=1, C=2, G=4, T=8`, `R=A|G=5`, `N=15`). Two IUPAC codes "agree" if their
+bit sets intersect — `R` matches `A` (because R = A|G ⊃ A) but disjoint with
+`Y` (R ∩ Y = AG ∩ CT = ∅). `iupac_levenshtein` is edit distance with
+substitution cost = 0 if bits overlap, else 1.
+
+`specific_overlap` counts positions where both motifs are at most 2-letter
+codes AND have overlapping bits. Used as an evidence floor: dedup will only
+merge two motifs if they share at least `max(4, ceil(0.7·min_specific))`
+specific positions. Without this gate, two distinct bipartite truths that
+happen to share an N-spacer (e.g. `GCANNNNNNTTAA` vs `SGANNNNNNTGAN`) collapse
+into one because Lev = 0 across the spacer.
+
+### `motifs_alignable(a, b, max_h)`
+
+Returns `True` if `a` looks like a duplicate of `b` (or its RC) — i.e. their
+lengths differ by ≤1, IUPAC-Levenshtein ≤ `max_h` in either fwd or rc
+orientation, AND `specific_overlap` covers the floor, AND (for same-length
+lev≥2) the number of bit-disjoint specific positions is ≤1.
+
+### `matches_centered_mask(seqs, pat_bits, pat_rc_bits)`
+
+Boolean mask over `seqs`: which sequences have `pat` (or `pat_rc`) matching
+at any start `s` such that the matched span overlaps `[METH_CENTER ± 2]`. The
+pos.fa convention is that the methylated base is at index `METH_CENTER`, so a
+match must overlap that anchor — otherwise it's a coincidental occurrence in
+genomic flanking context.
+
+### `count_canonical_kmers(seqs, start, k)`
+
+For every sequence (skipping rows with N at the window), encode the window as
+an integer (2 bits per base), compute its reverse complement, take
+`canon = min(km, rc)` so a k-mer and its RC count as the same key. Return
+`{canon_int: count}`. Used in Step 1 for seed scoring.
+
+---
+
+## `find_motifs(pos_seqs, neg_seqs)` — the main loop
+
+Walk through one iteration:
+
+### Setup (per iteration)
+
+```
+active_freq_full = freq_matrix(active, 0, SEQ_LEN)
+rescue_active = (active.shape[0] > 80
+                 AND (results < 6 OR active_frac >= 0.03))
+```
+
+`rescue_active` lets the loop accept weaker seeds when there's still a
+substantial fraction of the original positives unexplained — this is what
+unblocks combo/partial BEDs with 15-20 truth motifs.
+
+### Step 1 — seed scan
+
+For every `(k, start)` window:
+- Count canonical k-mers in `active` and `neg`.
+- For each canon meeting `MIN_SEED_COUNT=5`:
+  - `score = pc * log2((pc/pos_n) / ((nc + 0.5)/(neg_n + 0.5))) + k * 0.01`
+  - The `+ k * 0.01` term breaks ties in favor of longer (more specific)
+    k-mers.
+- Track the best `(k, start, canon)`.
+
+If best score ≤ 1.0 (or 0.0 in rescue mode), break.
+
+### Step 2 — filter to seed-bearing seqs
+
+Keep only sequences whose window at `[seed_start, seed_end)` exactly equals
+the seed (forward) OR its reverse complement.
+
+#### Strand-collision split (the subtlest part)
+
+When the seed is **non-palindromic** AND both fwd and rc orientations populate
+the seed window with roughly comparable counts, the union filter mixes two
+RC-related populations. Their non-seed positions average to `W/M/R/Y` codes
+that don't match either underlying truth. Concrete failure: truth `CCCAGG`
+puts `CCAGG` at the seed window on the fwd strand and `CCTGG` on the RC
+strand; the union shows `CCWGG` instead of `CCCAGG`.
+
+The fix: if both partitions have ≥`MIN_MOTIF_SITES` and the smaller is
+≥25% of the total, take just the dominant strand IF it gives a
+strand-asymmetric advantage. Two discriminators:
+
+1. **(a) flanking-IC:** a position adjacent to the seed has IC ≥ 0.7 in the
+   dominant partition but < 0.7 in the union. (E.g., the leading C of
+   `CCCAGG` is 100% in the dominant fwd partition, 50% in the union.)
+2. **(b) seed-internal recovery:** a position **inside the seed** is called
+   as a specific base (A/C/G/T) by `iupac_char` on the dominant partition but
+   as a degenerate code (M/R/W/...) on the union. This catches high-k partial
+   datasets where multiple motifs straddle the same seed.
+
+If neither discriminator fires, keep the union (avoids over-fitting on truly
+palindromic motifs).
+
+### Step 3 — extend seed bounds via IC
+
+Walk left and right from the seed boundaries, growing as long as
+`pos_ic_full[i] ≥ IC_THRESH=0.7`. With **one-position look-ahead**: skip a
+single mid-IC position (≥0.35 but <0.7) if the next position is a strong
+anchor (≥1.0). This recovers truth-positive bases past one weak internal
+position (e.g., partial-methylation or an embedded 2-letter code) without
+allowing unbounded over-extension.
+
+If the resulting close-half exceeds `MAX_W=15`, trim the lower-IC end.
+
+### Step 4 — bipartite far-half search (Type I R-M motifs)
+
+For each spacer length `MIN_SPACER..=MAX_SPACER` (1..12):
+- Try a far half to the right of the close half: walk outward while
+  `pos_ic_full[i] ≥ BIP_FAR_IC_THRESH=0.5`. Cap at
+  `MAX_BIPARTITE_TOTAL=17 - close_len - spacer_len`.
+- If `far_len ≥ MIN_FAR_HALF=2` and `sum(IC) ≥ MIN_FAR_IC_SUM=2.5`, this is a
+  candidate.
+- Pick the candidate with the highest `sum(IC)` across all spacer lengths and
+  both sides (right of close vs left of close).
+
+If no candidate qualifies, the motif is just the close half.
+
+### Step 5 — build the IUPAC consensus
+
+Use `consensus_seed_aware` for the close half (so seed positions get N when
+the active-set distribution is uniform). For the far half (if bipartite),
+just call `iupac_char` on the filtered-set frequencies. Splice them together
+with `N * spacer_len` between.
+
+### Step 6 — garbage gates and Fisher's exact
+
+In order:
+
+1. **MIN_MOTIF_SPECIFIC=4.** The motif must have ≥ 4 fully-specific (A/C/G/T)
+   positions. Otherwise it's too generic.
+2. **pos_match centered.** Count sequences where the IUPAC matches anywhere
+   in the centered window (`matches_centered_mask`). If `< 10`, reject.
+3. **MAX_NEG_MATCH_RATE.** Fraction of negatives matching the motif must be
+   ≤ 0.20 (or ≤ 0.15 for short motifs ≤5bp).
+4. **MIN_ENRICH_RATIO=3.0.** `pos_rate / neg_rate ≥ 3`. Catches "genome-
+   frequency" 4-mers like `CCAG` that pass the absolute neg cap but contribute
+   no real methylation signal.
+5. **Raw-rate gate (short motifs).** For `len ≤ 5` the active-rate ratio can
+   look high simply because `active` is depleted post-mask. Require
+   `(pos_match / pos_total) / neg_rate ≥ 2.0` (or ≥3.0 for `len ≤ 4`).
+6. **Fisher's exact e-value ≤ 0.1.** The final statistical gate.
+
+If any gate fails: in rescue mode, blacklist the seed and continue; outside
+rescue, break.
+
+### Step 7 — emit motif, mask, reset blacklists
+
+Append the motif to `results`, remove all matching sequences from `active`,
+and **clear the seed blacklists**. The blacklists collected garbage seeds
+under the *prior* active distribution; after masking, the residual sequences
+have a different distribution and a previously-rejected seed might now form a
+clean motif.
+
+### Loop termination
+
+The loop ends when:
+- `active.len() < MIN_MOTIF_SITES`,
+- `MAX_MOTIFS=25` reached,
+- best seed scores ≤ floor and we're not in rescue mode,
+- a garbage gate fires outside rescue mode.
+
+---
+
+## Post-loop: dedup + iterated refine
+
+`dedup_results(results, max_h=2)` — see "IUPAC string algebra" above. Two
+behaviors:
+
+1. **Same-length, Lev=1 merge.** Bit-union the two motifs at the differing
+   position when both have similar support count (≥0.5 ratio) and the
+   specific-overlap + identical-specific-overlap floors are met.
+2. **Alignable drop.** If `motifs_alignable` returns true, drop the candidate
+   (keeping the earlier one). For RC-aligned same-length pairs that differ at
+   exactly one position, also broaden the kept motif's bit-set at that
+   position.
+
+`refine_motifs` — for each motif in the deduped list:
+1. Find the first centered match (lowest offset, fwd preferred) per
+   sequence in the **original full pos.fa** (not the iteration's filtered
+   subset).
+2. Tally per-position base counts. Also tally up to 2 positions of left/right
+   flank counts.
+3. Re-build the IUPAC consensus from these counts.
+4. Try to **extend** by up to 2 positions per flank (only while
+   `iupac_char` ≠ N AND flank totals ≥ MIN_MOTIF_SITES).
+5. Trim leading/trailing N. Trim borderline 2-letter codes (top2_sum < 0.85).
+6. Replace the motif only if the refined version has **strictly higher**
+   effective specificity, OR the same specificity at shorter length, OR a
+   borderline trim happened.
+
+`refine_motifs` is run up to 3 times (a fixed point — usually converges in 1
+or 2 passes).
+
+---
+
+## XML output
+
+The final motifs are written to `<out_dir>/streme.xml` in a STREME-compatible
+format. Fields filled in:
+
+- `<motif id="N-IUPACSTRING">` per motif, with width, p-value, e-value, total
+  sites.
+- One `<pos>` element per motif position with the per-base frequencies.
+
+This is what MicrobeMod's `assign_motifs()` parses.
+
+---
+
+## Where the algorithmic sophistication lives
+
+If you skim the file once, the parts you should read carefully are:
+
+1. **The seed scan** in `find_motifs` — how seed score is computed and how
+   the rescue gate widens the search.
+2. **`consensus_seed_aware`** — the seed-position N override.
+3. **The strand-collision split** — the (a)/(b) discriminators.
+4. **`iupac_levenshtein` + `specific_overlap` + `motifs_alignable`** — the
+   logic that decides what counts as a "duplicate" motif. This is where
+   subtle bugs live (cf. the v3-loop iter17/iter42/iter17b commits in the
+   Rust history).
+5. **The garbage gates** at Step 6 of `find_motifs`. They're stacked
+   conservatively — if you remove or weaken any, you tend to admit
+   genome-composition artifacts that weren't real methylation.
+6. **`refine_motifs`** — the post-loop pass that re-derives consensus from
+   the full pos set rather than the seed-filtered subset.
+
+The rest (FASTA loading, IUPAC bit-set algebra, XML writer, CLI) is plumbing.

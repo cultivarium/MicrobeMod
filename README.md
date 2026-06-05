@@ -63,7 +63,13 @@ Download the database (required for `annotate_rm` only - includes HMMs from [Def
 python download_db.py
 ```
 
-Install:
+*Update 2026*: FigShare is blocking programmatic URL downloads, so you'll have to setup the database directory. 
+
+Download this file: https://figshare.com/ndownloader/files/55209713
+
+Copy it to `./MicrobeMod/MicrobeMod/` and extract it like so `tar -xvf microbemod_db_v3.tar.gz`. When complete, there should be an extracted directory in `./MicrobeMod/MicrobeMod/db/`.
+
+When the database is downloaded, you can install MicrobeMod like so:
 
 ```
 cd ../
@@ -78,13 +84,8 @@ pytest
 
 ### Optional: Docker installation
 
-Optionally, we provide a [Docker container](https://github.com/cultivarium/MicrobeMod/tree/main/Docker) which can be built to run MicrobeMod without installing the dependencies on the host system. To build it, first download the microbemod database from FigShare and move it into the ./Docker/` directory:
-```
-mv microbemod_db_v3.tar.gz ./Docker/
-cd Docker
-```
+Optionally, we provide a [Docker container](https://github.com/cultivarium/MicrobeMod/tree/main/Docker) which can be built to run MicrobeMod without installing the dependencies on the host system. To build it:
 
-Then build the Docker image:
 ```
 docker build -t microbemod -f Dockerfile .
 ```
