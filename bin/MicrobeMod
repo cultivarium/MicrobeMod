@@ -15,10 +15,12 @@ import argparse
 import os
 import sys
 
+# Make the local repo copy of MicrobeMod take precedence over any stale
+# site-packages install (must happen BEFORE importing MicrobeMod).
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from MicrobeMod import microbemod, restriction_modification
 from MicrobeMod._version import __version__
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 if __name__ == "__main__":
@@ -85,7 +87,17 @@ if __name__ == "__main__":
         action="store",
         default="streme",
         required=False,
-        help="Path to streme executable.",
+        help="Path to streme executable (only used when --motif_caller streme).",
+    )
+
+    parser_mod.add_argument(
+        "--motif_caller",
+        action="store",
+        default="python",
+        choices=["python", "streme"],
+        required=False,
+        help="Motif-calling engine: 'python' (built-in microbe_motif, "
+        "background-corrected; default) or 'streme' (legacy MEME-suite STREME).",
     )
 
     parser_mod.add_argument(
@@ -228,6 +240,7 @@ if __name__ == "__main__":
             args.percent_methylation_cutoff,
             args.percent_cutoff_streme,
             args.methylation_confidence_threshold,
+            motif_caller=args.motif_caller,
         )
 
 
