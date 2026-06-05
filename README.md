@@ -6,9 +6,28 @@ MicrobeMod is a workflow and toolkit for exploring prokaryotic methylation in na
 
 ![Overview of the MicrobeMod pipeline](./PipelineOverview.png?raw=true")
 
-December 2023 update: MicrobeMod v1.0.3 is now compatible with the 4mC all-context model available through Rerio! 
 
-July 2024 update: MicrobeMod v1.0.4 is now compatible with the 4mC_5mC all-context models available through Dorado 0.7+!
+### June 2026 update: MicrobeMod v1.5 motif calling replaces STREME
+
+MicrobeMod v1.5 includes a custom motif calling algorithm implemented in `microbe_motif.py` that is now the default behavior. Legacy motif calling with STREME is still available by passing the `--motif_caller streme` parameter.
+
+If you do not wish to run the legacy mode, STREME is no longer required as a dependency. 
+
+The new motif caller is considerably faster (about 5x faster in our testing) than STREME, and produces considerably improved motifs, on both real data and a synthetic benchmark. 
+
+Benchmarking results are below, comparing motif accuracy and in a large synthetically constructed test dataset of microbes with increasingly complex methylomes (left), and on comparisons in real data to strains with previously reported motifs from REBASE (right).
+
+We also include here a comparison to nanomotif. In our hands, the accuracy of the MicrobeMod v1.5 motif caller slightly outperforms nanomotif in terms of motif accuracy and quality. 
+
+![MicrobeMod v1.5 benchmarking](./MicrobeMod15_benchmark.png?raw=true)
+
+Please note, the new motif caller was written in its entirety by Claude Opus 4.7 and Claude Opus 4.8. While it has been extensively benchmarked, code written by large language models may contain mistakes. 
+On your own data, you may wish to compare its results to both the legacy streme approach with `--motif_caller streme`, and it is always useful to carefully inspect the raw data alongside your results.
+
+### July 2024 update: MicrobeMod v1.0.4 is now compatible with the 4mC_5mC all-context models available through Dorado 0.7+!
+
+### December 2023 update: MicrobeMod v1.0.3 is now compatible with the 4mC all-context model available through Rerio! 
+
 
 ## Data
 
@@ -42,7 +61,7 @@ You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
 
 *July 2024 update*: MicrobeMod is also compatible with Modkit 0.3 according to our testing.
   
-5. **STREME**: https://meme-suite.org/meme/doc/download.html
+5. **STREME**: https://meme-suite.org/meme/doc/download.html (optional)
 You can also install STREME via conda: `conda install -c bioconda meme`.
 
 Both can also be installed via conda, although you may run into errors on some systems: 
