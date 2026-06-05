@@ -205,10 +205,21 @@ if __name__ == "__main__":
         "--version", action="store_true", help="Show the version number and exit"
     )
 
+    # Show the relevant subcommand's help when it is invoked with no arguments,
+    # instead of argparse's terse "the following arguments are required" error.
+    subcommand_parsers = {"call_methylation": parser_mod, "annotate_rm": parser_rm}
+    if len(sys.argv) == 2 and sys.argv[1] in subcommand_parsers:
+        subcommand_parsers[sys.argv[1]].print_help()
+        sys.exit()
+
     args = parser.parse_args()
 
     if args.version:
         print(__version__)
+        sys.exit()
+
+    if args.subparser is None:
+        parser.print_help()
         sys.exit()
 
     if args.subparser == "call_methylation":
