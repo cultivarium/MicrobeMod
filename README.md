@@ -17,6 +17,8 @@ The new motif caller is considerably faster (about 5x faster in our testing) tha
 
 Benchmarking results are below, comparing motif accuracy and in a large synthetically constructed test dataset of microbes with increasingly complex methylomes (left), and on comparisons in real data to strains with previously reported motifs from REBASE (right).
 
+The synthetic dataset is constructed from real methylomes reported in the REBASE database. Synthetic genome-wide MethylBED files are generated based on the expected methylation motifs of these strains, and used directly as input. For more details on synthetic dataset construction, see `./motif_calling_eval/eval/`. 
+
 We also include here a comparison to nanomotif. In our hands, the accuracy of the MicrobeMod v1.5 motif caller slightly outperforms nanomotif in terms of motif accuracy and quality. 
 
 ![MicrobeMod v1.5 benchmarking](./MicrobeMod15_benchmark.png?raw=true)
@@ -61,8 +63,8 @@ You can also install Modkit via conda: `conda install -c nanoporetech modkit`.
 
 *July 2024 update*: MicrobeMod is also compatible with Modkit 0.3 according to our testing.
   
-5. **STREME**: https://meme-suite.org/meme/doc/download.html (optional)
-You can also install STREME via conda: `conda install -c bioconda meme`.
+5. **STREME**: https://meme-suite.org/meme/doc/download.html 
+You can also install STREME via conda: `conda install -c bioconda meme`.  (**STREME is now optional**)
 
 Both can also be installed via conda, although you may run into errors on some systems: 
 
