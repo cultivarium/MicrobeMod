@@ -24,6 +24,10 @@ REF = {}
 # matching the python caller's SEQ_LEN=26 / METH_CENTER=13 convention (and the
 # motif_caller benchmark). STREME is unaffected by the extra 2 bp of flank.
 WINDOW_SIZE = 13
+# Fixed seed for the genomic background control sampling so motif-calling
+# results are reproducible run-to-run. Matches the standalone microbe_motif
+# bed path, which also seeds with 13.
+BACKGROUND_SEED = 13
 MIN_EVALUE = 0.1
 MOTIF_FREQ_CUTOFF = (
     0.8  # If a nucleotide isn't 80% of sites in a motif, converted to an N
@@ -252,8 +256,9 @@ def write_to_fasta(
         for _, contig in REF.items():
             reference_genome += str(contig)
         sites = []
+        rng = random.Random(BACKGROUND_SEED)
         for i in range(0, 100000):
-            random_pos = random.randint(200, len(reference_genome) - 200)
+            random_pos = rng.randint(200, len(reference_genome) - 200)
             sites.append(
                 reference_genome[random_pos - WINDOW_SIZE : random_pos + WINDOW_SIZE]
             )

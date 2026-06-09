@@ -16,6 +16,7 @@ setup(name='MicrobeMod',
       scripts=['bin/MicrobeMod'],
       python_requires='>=3.4.0',
       install_requires=[
+          'numpy>=1.21',
           'pandas>=1.5.0',
           'biopython>=1.81'
       ],
