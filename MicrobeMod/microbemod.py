@@ -320,7 +320,12 @@ def assign_motifs(modkit_table, streme_output):
     motif_sites = {}
 
     for motif in root[1]:
-        evalue = float(motif.get("test_evalue"))
+        # STREME >=5.4.0 reports "test_evalue"; older versions (e.g. 5.3.0)
+        # only report "test_pvalue". Fall back so both formats work.
+        evalue = motif.get("test_evalue")
+        if evalue is None:
+            evalue = motif.get("test_pvalue")
+        evalue = float(evalue)
         if evalue < MIN_EVALUE:
             ### Evalue cutoff
             motif_old = motif.get("id").split("-")[1]
@@ -349,13 +354,21 @@ def assign_motifs(modkit_table, streme_output):
 
             ### trim N's
             motif_new = motif_new.strip("N")
+            # STREME >=5.4.0 reports "total_sites"; older versions (e.g. 5.3.0)
+            # don't, so derive it from the train/test positive site counts.
+            total_sites = motif.get("total_sites")
+            if total_sites is None:
+                total_sites = str(
+                    int(motif.get("train_pos_count", 0))
+                    + int(motif.get("test_pos_count", 0))
+                )
             logging.info(
                 "Found and trimmed motif: "
                 + motif.get("id")
                 + "\t"
                 + motif_new
                 + "\t"
-                + motif.get("total_sites")
+                + total_sites
             )
             motifs.append(motif_new)
             motif_new_to_original[motif_new] = motif.get("id")
