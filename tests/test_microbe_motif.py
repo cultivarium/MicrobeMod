@@ -4,7 +4,7 @@ These cover the pieces that the legacy STREME path never exercised: the IUPAC
 consensus logic, the Fisher exact p-value, k-mer counting, the STREME-format
 XML round-trip, and an end-to-end synthetic recovery of a known motif.
 
-The end-to-end tests pin opt_max_passes=0 so the wall-clock-bounded optimizer
+The end-to-end tests pin opt_max_seconds=0 so the wall-clock optimizer
 is disabled and the output is fully deterministic for assertion.
 """
 import math
@@ -160,7 +160,7 @@ def test_find_motifs_recovers_palindrome(tmp_path):
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=1)
     pos = mm.load_fasta(pos_path)
     neg = mm.load_fasta(neg_path)
-    motifs = mm.find_motifs(pos, neg, opt_max_passes=0)
+    motifs = mm.find_motifs(pos, neg, opt_max_seconds=0)
     called = [m.iupac for m in motifs]
     assert any("GATC" in c for c in called), called
 
@@ -170,7 +170,7 @@ def test_find_motifs_recovers_longer_palindrome(tmp_path):
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GAATTC", seed=2)
     pos = mm.load_fasta(pos_path)
     neg = mm.load_fasta(neg_path)
-    motifs = mm.find_motifs(pos, neg, opt_max_passes=0)
+    motifs = mm.find_motifs(pos, neg, opt_max_seconds=0)
     called = [m.iupac for m in motifs]
     assert any("GAATTC" in c for c in called), called
 
@@ -191,7 +191,7 @@ def test_find_motifs_no_signal_returns_nothing(tmp_path):
     write(pos_path, 300)
     write(neg_path, 3000)
     motifs = mm.find_motifs(
-        mm.load_fasta(str(pos_path)), mm.load_fasta(str(neg_path)), opt_max_passes=0
+        mm.load_fasta(str(pos_path)), mm.load_fasta(str(neg_path)), opt_max_seconds=0
     )
     assert motifs == []
 
@@ -200,7 +200,7 @@ def test_run_from_fastas_writes_streme_xml(tmp_path):
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=4)
     out_dir = tmp_path / "out"
     result = mm.run_from_fastas(
-        pos_path, neg_path, str(out_dir), output_type="xml", opt_max_passes=0
+        pos_path, neg_path, str(out_dir), output_type="xml", opt_max_seconds=0
     )
     assert result == str(out_dir)
     xml_path = os.path.join(str(out_dir), "streme.xml")
@@ -210,37 +210,39 @@ def test_run_from_fastas_writes_streme_xml(tmp_path):
     assert any("GATC" in i for i in ids), ids
 
 
-# ── Optimizer determinism (pass-capped, not wall-clock) ─────────────────────
-def test_optimize_motifs_is_deterministic(tmp_path):
-    # The set-level optimizer must give identical output on repeated runs of the
-    # same input — it is bounded by a deterministic pass cap, not wall time.
-    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=5)
-    pos = mm.load_fasta(pos_path)
-    neg = mm.load_fasta(neg_path)
-    # Seed the climb with a deliberately too-broad motif so there is real work
-    # for the hill-climb to do (so passes/perturbations are exercised).
-    seed_iupac = "GANC"
-    freq = np.array([mm._iupac_pwm_row(c) for c in seed_iupac])
-    start = [mm.Motif(1, seed_iupac, len(seed_iupac), 1e-5, 1e-6, 100, freq)]
-
-    out_a, info_a = mm.optimize_motifs(start, pos, neg, max_passes=mm.MAX_OPT_PASSES)
-    out_b, info_b = mm.optimize_motifs(start, pos, neg, max_passes=mm.MAX_OPT_PASSES)
-
-    assert [m.iupac for m in out_a] == [m.iupac for m in out_b]
-    assert info_a["passes"] == info_b["passes"]
-    assert info_a["perturbations_tried"] == info_b["perturbations_tried"]
-    # Never exceeds the pass cap, and the climb never lowers the objective.
-    assert info_a["passes"] <= mm.MAX_OPT_PASSES
-    assert info_a["final_score"] >= info_a["initial_score"]
-
-
-def test_optimize_motifs_respects_zero_passes(tmp_path):
-    # max_passes<=0 disables the optimizer (used by the deterministic tests).
+# ── Optimizer (wall-clock budget; warns when time-truncated) ────────────────
+def test_optimize_motifs_respects_zero_seconds(tmp_path):
+    # max_seconds<=0 disables the optimizer (used by the end-to-end tests). The
+    # input motif set is returned untouched and nothing is tried.
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=6)
     pos = mm.load_fasta(pos_path)
     neg = mm.load_fasta(neg_path)
     freq = np.array([mm._iupac_pwm_row(c) for c in "GANC"])
     start = [mm.Motif(1, "GANC", 4, 1e-5, 1e-6, 100, freq)]
-    out, info = mm.optimize_motifs(start, pos, neg, max_passes=0)
+    out, info = mm.optimize_motifs(start, pos, neg, max_seconds=0)
     assert out is start
     assert info["perturbations_tried"] == 0
+    assert info["converged"] is True
+
+
+def test_optimize_motifs_warns_when_time_truncated(tmp_path, capsys, monkeypatch):
+    # When the hill-climb exhausts its time budget before converging, the run is
+    # machine-/load-dependent: it must flag converged=False and warn on stderr,
+    # never produce a non-reproducible result silently. A fake monotonic clock
+    # makes "time runs out mid-search" deterministic, independent of real speed.
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=7)
+    pos = mm.load_fasta(pos_path)
+    neg = mm.load_fasta(neg_path)
+    # A deliberately too-broad seed gives the climb real work to do.
+    freq = np.array([mm._iupac_pwm_row(c) for c in "GANC"])
+    start = [mm.Motif(1, "GANC", 4, 1e-5, 1e-6, 100, freq)]
+
+    # Clock reads 0.0 first (t0), then advances 1s per call. With max_seconds=5
+    # the search enters, tries a few perturbations, then crosses the budget.
+    ticks = iter([0.0] + [float(n) for n in range(1, 100000)])
+    monkeypatch.setattr(mm.time, "time", lambda: next(ticks))
+
+    _out, info = mm.optimize_motifs(start, pos, neg, max_seconds=5)
+    assert info["perturbations_tried"] > 0
+    assert info["converged"] is False
+    assert "WARNING" in capsys.readouterr().err
