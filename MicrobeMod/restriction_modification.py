@@ -69,9 +69,20 @@ def convert_genbank(output_prefix, input_genbank):
             i = 1
             for feature in record.features:
                 if feature.type == "CDS" and "translation" in feature.qualifiers:
+                    # Not every CDS carries a locus_tag (common in NCBI records
+                    # and some Prokka/Bakta output). Fall back to protein_id,
+                    # then gene, then a synthesized contig-and-index id so the
+                    # gene always has a unique, non-crashing identifier.
+                    quals = feature.qualifiers
+                    gene_id = (
+                        quals.get("locus_tag", [None])[0]
+                        or quals.get("protein_id", [None])[0]
+                        or quals.get("gene", [None])[0]
+                        or "{}_{}".format(record.id, i)
+                    )
                     f.write(
                         ">{} # {} # {} # {} # {}_{}\n".format(
-                            feature.qualifiers["locus_tag"][0],
+                            gene_id,
                             feature.location.start,
                             feature.location.end,
                             feature.location.strand,
@@ -80,7 +91,7 @@ def convert_genbank(output_prefix, input_genbank):
                         )
                     )
                     f.write(feature.qualifiers["translation"][0] + "\n")
-                    gene_locations[feature.qualifiers["locus_tag"][0]] = (record.id, i)
+                    gene_locations[gene_id] = (record.id, i)
                     i += 1
 
         return output_prefix + ".faa", gene_locations
