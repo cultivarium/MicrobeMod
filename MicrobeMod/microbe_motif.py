@@ -406,7 +406,7 @@ def dedup_results(motifs, max_h):
     return kept
 
 # ── Main motif finder ───────────────────────────────────────────────────────
-def find_motifs(pos_seqs, neg_seqs, bg=None, opt_max_seconds=20.0, opt_lam=1.0):
+def find_motifs(pos_seqs, neg_seqs, bg=None):
     """Iterative: find best seed → filter → extend → check for bipartite far-half →
     consensus → garbage gates → Fisher → mask matched → repeat."""
     active = pos_seqs.copy()
@@ -650,175 +650,7 @@ def find_motifs(pos_seqs, neg_seqs, bg=None, opt_max_seconds=20.0, opt_lam=1.0):
         refined = refine_motifs(refined, pos_seqs, bg)
         if all(m.iupac == p for m, p in zip(refined, prev)): break
     palindromized = palindromize(refined)
-    optimized, opt_info = optimize_motifs(palindromized, pos_seqs, neg_seqs,
-                                          max_seconds=opt_max_seconds, lam=opt_lam)
-    if opt_info["perturbations_tried"] > 0:
-        print(f"  [optimize] passes={opt_info['passes']} "
-              f"tries={opt_info['perturbations_tried']} "
-              f"score {opt_info['initial_score']:.4f} → {opt_info['final_score']:.4f} "
-              f"({opt_info['elapsed_s']:.1f}s)", file=sys.stderr)
-    return dedup_results(optimized, 2)
-
-# ── Greedy hill-climb on motif set: improve TPR - λ*FPR ─────────────────────
-_OPT_IUPAC_CODES = "ACGTMRWSYKBDHVN"
-def optimize_motifs(motifs, pos_seqs, neg_seqs, max_seconds=10.0, lam=1.0):
-    """Greedy hill-climb on the motif set to maximize a set-level objective:
-
-        score(M) = TPR(M) - λ * FPR(M)
-
-    where TPR = fraction of pos windows matched by at least one motif and
-    FPR = fraction of neg windows matched.  For each motif, tries local
-    perturbations (per-position IUPAC mutations, single-position flank
-    trims and 4-base flank extensions) and accepts the first one that
-    improves the set-level score.  Iterates passes over all motifs until
-    no improvement is found OR max_seconds elapses.
-
-    NOTE: the search is bounded by a wall-clock budget. If that budget is hit
-    before the hill-climb converges, the result depends on how many
-    perturbations the machine got through, so it is NOT reproducible across
-    machines or under varying load. When that happens a warning is emitted so
-    the user knows the run was time-truncated; raise max_seconds (or rerun on a
-    quiet machine) for a reproducible, converged result.
-
-    Returns (new_motifs, info_dict).  info_dict contains passes,
-    perturbations_tried, elapsed_s, initial_score, final_score, converged.
-    """
-    if not motifs or max_seconds <= 0:
-        return motifs, {"elapsed_s": 0.0, "passes": 0,
-                        "perturbations_tried": 0,
-                        "initial_score": 0.0, "final_score": 0.0,
-                        "converged": True}
-    t0 = time.time()
-    pos_n = int(pos_seqs.shape[0])
-    neg_n = int(neg_seqs.shape[0])
-
-    def compute_masks(iupac):
-        pb = iupac_to_bits_array(iupac)
-        rb = iupac_to_bits_array(revcomp_iupac(iupac))
-        return (matches_centered_mask(pos_seqs, pb, rb),
-                matches_centered_mask(neg_seqs, pb, rb))
-
-    iupacs = [m.iupac for m in motifs]
-    pos_masks = []
-    neg_masks = []
-    for iup in iupacs:
-        pm, nm = compute_masks(iup)
-        pos_masks.append(pm); neg_masks.append(nm)
-
-    def union_count(masks, n):
-        if not masks: return 0
-        u = np.zeros(n, dtype=bool)
-        for m in masks: u |= m
-        return int(u.sum())
-
-    def score():
-        tpr = union_count(pos_masks, pos_n) / max(1, pos_n)
-        fpr = union_count(neg_masks, neg_n) / max(1, neg_n)
-        return tpr - lam * fpr
-
-    initial_score = score()
-    current_score = initial_score
-    perturbations_tried = 0
-    passes = 0
-
-    def perturbations(iup):
-        # Per-position IUPAC mutations
-        for j in range(len(iup)):
-            for c in _OPT_IUPAC_CODES:
-                if c != iup[j]:
-                    yield iup[:j] + c + iup[j+1:]
-        # Flank trims
-        if len(iup) > MIN_W:
-            yield iup[1:]
-            yield iup[:-1]
-        # Flank extensions with each IUPAC code (specific + 2-letter + 3-letter).
-        # The objective gate (TPR - λ*FPR) and the trim move are sufficient to
-        # reject over-extension; allowing degenerate codes lets the hill-climb
-        # reach things like CATGCCH (truth) in one step from CATGCC.
-        if len(iup) < SEQ_LEN:
-            for c in _OPT_IUPAC_CODES:
-                yield c + iup
-                yield iup + c
-
-    converged = False
-    while time.time() - t0 < max_seconds:
-        improved = False
-        timed_out = False
-        for i in range(len(iupacs)):
-            if time.time() - t0 >= max_seconds:
-                timed_out = True
-                break
-            # Precompute OR over all motifs except i (for cheap delta eval).
-            pos_other = np.zeros(pos_n, dtype=bool)
-            neg_other = np.zeros(neg_n, dtype=bool)
-            for j in range(len(pos_masks)):
-                if j != i:
-                    pos_other |= pos_masks[j]
-                    neg_other |= neg_masks[j]
-
-            best_score = current_score
-            best_cand = None
-            best_pm = None
-            best_nm = None
-            for cand in perturbations(iupacs[i]):
-                if time.time() - t0 >= max_seconds:
-                    timed_out = True
-                    break
-                perturbations_tried += 1
-                pm, nm = compute_masks(cand)
-                new_tpr = int((pos_other | pm).sum()) / max(1, pos_n)
-                new_fpr = int((neg_other | nm).sum()) / max(1, neg_n)
-                new_score = new_tpr - lam * new_fpr
-                if new_score > best_score + 1e-9:
-                    best_score = new_score
-                    best_cand = cand
-                    best_pm = pm
-                    best_nm = nm
-            if best_cand is not None:
-                iupacs[i] = best_cand
-                pos_masks[i] = best_pm
-                neg_masks[i] = best_nm
-                current_score = best_score
-                improved = True
-        passes += 1
-        # A full pass with no accepted move = converged — but only if we didn't
-        # bail out of the pass early on the time budget.
-        if not improved and not timed_out:
-            converged = True
-            break
-
-    elapsed = time.time() - t0
-    # Option C: keep the wall-clock budget, but make non-convergence visible.
-    # If the time budget was exhausted before the search converged, the result
-    # is machine- and load-dependent, so warn loudly rather than fail silently.
-    if not converged and perturbations_tried > 0:
-        print(f"  [optimize] WARNING: hit the {max_seconds:.0f}s time budget "
-              f"before converging ({passes} passes, {perturbations_tried} "
-              f"perturbations tried); motif output may not be reproducible "
-              f"across machines or runs. Raise --opt-seconds for a stable, "
-              f"converged result.", file=sys.stderr)
-
-    out = []
-    for old, new_iup in zip(motifs, iupacs):
-        if new_iup == old.iupac:
-            out.append(old); continue
-        new_freq = np.zeros((len(new_iup), 4))
-        for j, c in enumerate(new_iup):
-            bits = iupac_bits(c)
-            n = bin(bits).count('1')
-            if n > 0:
-                for k in range(4):
-                    if bits & (1 << k):
-                        new_freq[j, k] = 1.0 / n
-            else:
-                new_freq[j] = 0.25
-        out.append(Motif(old.idx, new_iup, len(new_iup),
-                         old.evalue, old.pvalue, old.total_sites, new_freq))
-    return out, {"elapsed_s": round(elapsed, 2), "passes": passes,
-                 "perturbations_tried": perturbations_tried,
-                 "initial_score": round(initial_score, 4),
-                 "final_score": round(current_score, 4),
-                 "converged": converged}
+    return dedup_results(palindromized, 2)
 
 def palindromize(motifs):
     """Merge each motif with its RC. Accept the merge if specificity loss
@@ -1085,7 +917,7 @@ def write_tsv(path, motifs, mod_type=None):
 
 # ── In-process API for MicrobeMod's call_methylation pipeline ──────────────
 def run_from_fastas(pos_path, neg_path, out_dir, output_type="xml",
-                    genome_path=None, opt_max_seconds=10.0):
+                    genome_path=None):
     """Read pos/neg FASTAs, find motifs, write streme.xml (or motifs.tsv).
 
     Returns the output directory if motifs were called, else None.
@@ -1102,8 +934,7 @@ def run_from_fastas(pos_path, neg_path, out_dir, output_type="xml",
     if pos_seqs.shape[0] < MIN_MOTIF_SITES:
         return None
     bg = compute_genome_bg(genome_path) if genome_path else None
-    motifs = find_motifs(pos_seqs, neg_seqs, bg=bg,
-                         opt_max_seconds=opt_max_seconds)
+    motifs = find_motifs(pos_seqs, neg_seqs, bg=bg)
     if output_type == "xml":
         write_xml(os.path.join(out_dir, "streme.xml"), motifs,
                   pos_seqs.shape[0], neg_seqs.shape[0])
@@ -1239,7 +1070,6 @@ def subcommand_main(bed_path, fasta_path, threads=1, output_type="tsv",
 def main():
     args = sys.argv[1:]
     pos_file = neg_file = out_dir = genome_file = None
-    opt_max_seconds = 10.0
     i = 0
     while i < len(args):
         a = args[i]
@@ -1247,14 +1077,12 @@ def main():
         elif a in ("-n", "--n") and i + 1 < len(args): neg_file = args[i+1]; i += 2
         elif a in ("-g", "--genome") and i + 1 < len(args): genome_file = args[i+1]; i += 2
         elif a == "-o" and i + 1 < len(args): out_dir = args[i+1]; i += 2
-        elif a == "--opt-seconds" and i + 1 < len(args):
-            opt_max_seconds = float(args[i+1]); i += 2
         elif a.startswith("--") and i + 1 < len(args) and not args[i+1].startswith('-'): i += 2
         else: i += 1
 
     if not (pos_file and neg_file and out_dir):
         sys.exit("Usage: motif_caller.py . -p pos.fa --n neg.fa [-g genome.fa] "
-                 "[--opt-seconds N] -o out_dir")
+                 "-o out_dir")
     os.makedirs(out_dir, exist_ok=True)
 
     print("microbe_motif: loading sequences…", file=sys.stderr)
@@ -1273,8 +1101,7 @@ def main():
               file=sys.stderr)
 
     print("microbe_motif: finding motifs…", file=sys.stderr)
-    motifs = find_motifs(pos_seqs, neg_seqs, bg=bg,
-                         opt_max_seconds=opt_max_seconds)
+    motifs = find_motifs(pos_seqs, neg_seqs, bg=bg)
     print(f"microbe_motif: found {len(motifs)} motif(s)  ({time.time()-t0:.1f}s)",
           file=sys.stderr)
     write_xml(os.path.join(out_dir, "streme.xml"), motifs,

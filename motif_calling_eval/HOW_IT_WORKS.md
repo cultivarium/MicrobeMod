@@ -34,13 +34,19 @@ The finder is **iterative**. In each iteration:
 7. **Mask** all sequences matching the emitted motif and repeat.
 
 The loop stops when no seed scores above the floor or `MAX_MOTIFS` (25) is
-reached. After the loop, two **post-processing** passes:
+reached. After the loop, three **post-processing** passes:
 
 - **Dedup** — collapse near-duplicate variants (same motif emitted twice with
   slight seed-bias differences, or a motif and its reverse complement).
 - **Refine** — re-derive each motif's consensus from *all* centered matches in
   the original `pos.fa` (not just the seed-filtered subset), allow optional
   flank extension by up to 2 positions per side, trim borderline IUPAC codes.
+- **Palindromize** — merge each motif with its reverse complement when the
+  specificity loss is small, recovering palindromic R-M motifs reported on one
+  strand (e.g. `CCTGG` → `CCWGG`).
+
+There is **no set-level optimizer**: the pipeline is fully deterministic, so the
+output depends only on the input (not on CPU speed or system load).
 
 ---
 
@@ -284,7 +290,7 @@ The loop ends when:
 
 ---
 
-## Post-loop: dedup + iterated refine
+## Post-loop: dedup + iterated refine + palindromize
 
 `dedup_results(results, max_h=2)` — see "IUPAC string algebra" above. Two
 behaviors:
@@ -313,6 +319,13 @@ behaviors:
 
 `refine_motifs` is run up to 3 times (a fixed point — usually converges in 1
 or 2 passes).
+
+`palindromize` — after refine, each motif is merged with its reverse complement
+when the merge costs ≤ 1.0 bit of specificity (catches palindromic R-M motifs
+reported as one strand, e.g. `CCTGG` → `CCWGG`; rejects non-palindromic motifs
+where the merge would collapse to junk). A final `dedup_results` pass follows.
+The motif set returned here is what gets written to XML — there is no further
+set-level optimization step.
 
 ---
 
