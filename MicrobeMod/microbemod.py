@@ -608,6 +608,7 @@ def main(
                     out_dir,
                     output_type="xml",
                     genome_path=reference_fasta,
+                    mod_type=methylation,
                 )
             else:
                 streme_out = run_streme(pos_fasta, streme_path)

@@ -44,6 +44,35 @@ def iupac_bits(c): return IUPAC_BITS.get(c, 0)
 def revcomp_iupac(s): return "".join(COMP_IUPAC.get(c, 'N') for c in reversed(s))
 def comp_iupac(c): return COMP_IUPAC.get(c, 'N')
 
+def _allowed_center_bits(mod_type):
+    """IUPAC bit-set the methylated center is allowed to take for a methylation
+    type — the modifiable base or its complement, since windows are read off
+    the forward strand and reverse-strand methylation shows up as the
+    complement at the center: 6mA -> A|T, 5mC/4mC/5hmC -> C|G.
+
+    Accepts either a modkit code ('a','m','21839','h') or a user label
+    ('6mA','5mC','4mC','5hmC'). Returns None (no constraint) if unrecognised."""
+    if mod_type is None:
+        return None
+    m = str(mod_type).lower()
+    if m in ("a", "6ma"):
+        return IUPAC_BITS['A'] | IUPAC_BITS['T']        # 9 (W): A or T
+    if m in ("m", "5mc", "21839", "4mc", "h", "5hmc"):
+        return IUPAC_BITS['C'] | IUPAC_BITS['G']        # 6 (S): C or G
+    return None
+
+def _constrain_center(iupac_str, idx, allowed_bits):
+    """Narrow the IUPAC code at position `idx` to `allowed_bits` (never widens).
+    If the called code shares no base with allowed_bits the data disagrees that
+    the center is modifiable, so it is left unchanged rather than fabricated."""
+    if allowed_bits is None or idx is None or not (0 <= idx < len(iupac_str)):
+        return iupac_str
+    cur = iupac_bits(iupac_str[idx])
+    b = cur & allowed_bits
+    if b == 0 or b == cur:
+        return iupac_str
+    return iupac_str[:idx] + BITS_IUPAC.get(b, 'N') + iupac_str[idx + 1:]
+
 # Match table[bits, encoded_base] → bool
 _MATCH_TABLE = np.zeros((16, 5), dtype=bool)
 for b in IUPAC_BITS.values():
@@ -351,11 +380,17 @@ def decode_kmer(km, k):
 
 # ── Motif data class ────────────────────────────────────────────────────────
 class Motif:
-    __slots__ = ("idx", "iupac", "width", "evalue", "pvalue", "total_sites", "freq")
-    def __init__(self, idx, iupac, width, evalue, pvalue, total_sites, freq):
+    __slots__ = ("idx", "iupac", "width", "evalue", "pvalue", "total_sites",
+                 "freq", "meth_index")
+    def __init__(self, idx, iupac, width, evalue, pvalue, total_sites, freq,
+                 meth_index=None):
         self.idx, self.iupac, self.width = idx, iupac, width
         self.evalue, self.pvalue, self.total_sites = evalue, pvalue, total_sites
         self.freq = freq
+        # Index within `iupac` of the methylated base (window METH_CENTER),
+        # tracked so consensus/refine/palindromize never widen it to a base
+        # that can't carry the modification (issue #52). None if unknown.
+        self.meth_index = meth_index
 
 # ── Dedup ───────────────────────────────────────────────────────────────────
 def dedup_results(motifs, max_h):
@@ -406,9 +441,14 @@ def dedup_results(motifs, max_h):
     return kept
 
 # ── Main motif finder ───────────────────────────────────────────────────────
-def find_motifs(pos_seqs, neg_seqs, bg=None):
+def find_motifs(pos_seqs, neg_seqs, bg=None, allowed_center_bits=None):
     """Iterative: find best seed → filter → extend → check for bipartite far-half →
-    consensus → garbage gates → Fisher → mask matched → repeat."""
+    consensus → garbage gates → Fisher → mask matched → repeat.
+
+    `allowed_center_bits` (from `_allowed_center_bits(mod_type)`) restricts the
+    methylated-center column to the modifiable base or its complement so the
+    caller can't emit a degenerate code at a position that can't carry the
+    modification (issue #52). None disables the constraint."""
     active = pos_seqs.copy()
     results = []
     pos_total = pos_seqs.shape[0]
@@ -559,9 +599,13 @@ def find_motifs(pos_seqs, neg_seqs, bg=None):
                     best_far_ic, bipartite = ic_sum, (False, sp, far_start, far_end_pos)
 
         # ── Step 5: build IUPAC consensus ──
+        # win_pos[i] = the window column each IUPAC position came from (None
+        # for spacer columns), so the methylated center (window METH_CENTER)
+        # can be located in the emitted motif and restricted below (issue #52).
         if bipartite is None:
             motif_freq, iupac_str = consensus_seed_aware(
                 filtered, active_freq_full, ms, me, seed_start, seed_end)
+            win_pos = list(range(ms, me))
         else:
             right, sp, far_start, far_end = bipartite
             close_freq, close_iupac = consensus_seed_aware(
@@ -573,9 +617,17 @@ def find_motifs(pos_seqs, neg_seqs, bg=None):
             if right:
                 motif_freq = np.concatenate([close_freq, spacer, far_freq])
                 iupac_str = close_iupac + spacer_str + far_iupac
+                win_pos = (list(range(ms, me)) + [None] * sp
+                           + list(range(far_start, far_end)))
             else:
                 motif_freq = np.concatenate([far_freq, spacer, close_freq])
                 iupac_str = far_iupac + spacer_str + close_iupac
+                win_pos = (list(range(far_start, far_end)) + [None] * sp
+                           + list(range(ms, me)))
+
+        # ── Step 5b: restrict the methylated-center column (issue #52) ──
+        meth_index = win_pos.index(METH_CENTER) if METH_CENTER in win_pos else None
+        iupac_str = _constrain_center(iupac_str, meth_index, allowed_center_bits)
 
         # ── Step 6: garbage gates + Fisher ──
         if sum(1 for c in iupac_str if c in "ACGT") < MIN_MOTIF_SPECIFIC:
@@ -632,7 +684,7 @@ def find_motifs(pos_seqs, neg_seqs, bg=None):
               f"pos_match={pos_match}/{active.shape[0]}, neg_match={neg_match}/{neg_n:.0f})",
               file=sys.stderr)
         results.append(Motif(idx, iupac_str, motif_freq.shape[0],
-                             evalue, pvalue, pos_match, motif_freq))
+                             evalue, pvalue, pos_match, motif_freq, meth_index))
 
         # ── Step 7: mask matched seqs; reset blacklists ──
         active = active[~pos_match_mask]
@@ -644,25 +696,37 @@ def find_motifs(pos_seqs, neg_seqs, bg=None):
         bg = compute_bg_from_seqs(neg_seqs)
 
     # ── Post-loop: dedup + iterated refinement → palindromize → final dedup ──
-    refined = refine_motifs(dedup_results(results, 2), pos_seqs, bg)
+    refined = refine_motifs(dedup_results(results, 2), pos_seqs, bg, allowed_center_bits)
     for _ in range(2):
         prev = [m.iupac for m in refined]
-        refined = refine_motifs(refined, pos_seqs, bg)
+        refined = refine_motifs(refined, pos_seqs, bg, allowed_center_bits)
         if all(m.iupac == p for m, p in zip(refined, prev)): break
-    palindromized = palindromize(refined)
+    palindromized = palindromize(refined, allowed_center_bits)
     return dedup_results(palindromized, 2)
 
-def palindromize(motifs):
+def palindromize(motifs, allowed_center_bits=None):
     """Merge each motif with its RC. Accept the merge if specificity loss
     <= 1.0 bit (catches palindromic R-M motifs reported as one strand,
     e.g. CCTGG → CCWGG; rejects non-palindromic motifs like GAGNNNNNGGG
-    where the merge collapses to junk)."""
+    where the merge collapses to junk).
+
+    A merge that would widen the methylated center to include a base that
+    can't carry the modification is rejected outright (issue #52): that
+    signals the motif isn't palindromic at the methylated position — e.g.
+    GACGGC, whose merge with its RC GCCGTC gives GMCGKC and puts A/C at the
+    methyl-A. Palindromes (GATC) short-circuit above; near-palindromes whose
+    methyl center is unchanged by the merge (CCTGG→CCWGG) are unaffected."""
     out = []
     for m in motifs:
         rc_str = revcomp_iupac(m.iupac)
         if rc_str == m.iupac:
             out.append(m); continue
         merged = merge_iupac(m.iupac, rc_str)
+        mi = m.meth_index
+        if (allowed_center_bits is not None and mi is not None
+                and 0 <= mi < len(merged)
+                and (iupac_bits(merged[mi]) & ~allowed_center_bits)):
+            out.append(m); continue
         old_eff = sum(iupac_specificity(c) for c in m.iupac)
         new_eff = sum(iupac_specificity(c) for c in merged)
         if old_eff - new_eff > 1.0 + 1e-6:
@@ -682,24 +746,32 @@ def palindromize(motifs):
                     f = np.array([0.25] * 4)
                 new_freq.append(f)
         out.append(Motif(m.idx, merged, len(merged), m.evalue, m.pvalue,
-                          m.total_sites, np.array(new_freq)))
+                          m.total_sites, np.array(new_freq), mi))
     return out
 
 # ── Refinement: re-derive consensus from ALL pos_seqs that match centered ──
-def refine_motifs(motifs, pos_seqs, bg):
+def refine_motifs(motifs, pos_seqs, bg, allowed_center_bits=None):
     """For each motif, re-derive consensus from every centered match (not the
     seed-filtered subset). Optionally extend by up to 2 flank positions per
     side, trim leading/trailing N, trim borderline 2-letter flanks.
 
     `bg` is the genome-wide background base frequency [pA, pC, pG, pT],
     used to suppress IUPAC over-calls at positions that just track local
-    genome composition."""
+    genome composition.
+
+    `allowed_center_bits` restricts the methylated center; the center index is
+    carried over from the input motif and shifted by the flank extend/trim
+    edits so the constraint still lands on the right column (issue #52)."""
     out = []
     lo, hi = max(0, METH_CENTER - CENTER_TOL), METH_CENTER + CENTER_TOL
     for m in motifs:
         m_len = len(m.iupac)
         if not (0 < m_len <= SEQ_LEN):
             out.append(m); continue
+        # The re-derived core consensus keeps motif orientation and length, so
+        # the methylated column starts at the input motif's index and is then
+        # shifted by left-flank prepends (+1) and leading trims (−1) below.
+        mi = m.meth_index
         pat_bits = iupac_to_bits_array(m.iupac)
         pat_rc_bits = iupac_to_bits_array(revcomp_iupac(m.iupac))
 
@@ -809,6 +881,7 @@ def refine_motifs(motifs, pos_seqs, bg):
             c = iupac_char_bg(f, bg)
             if c == 'N': break
             new_freq.insert(0, f); new_iupac = c + new_iupac
+            if mi is not None: mi += 1            # left prepend shifts center
         for k in range(2):
             if len(new_iupac) >= SEQ_LEN or right_totals[k] < MIN_MOTIF_SITES: break
             f = freq(right_flanks[k])
@@ -816,9 +889,11 @@ def refine_motifs(motifs, pos_seqs, bg):
             if c == 'N': break
             new_freq.append(f); new_iupac += c
 
-        # Trim flanking N and borderline 2-letter codes (top2_sum < 0.85)
+        # Trim flanking N and borderline 2-letter codes (top2_sum < 0.85).
+        # Leading trims shift the methylated center left by one each.
         while new_iupac.startswith('N') and len(new_iupac) > MIN_W:
             new_iupac, new_freq = new_iupac[1:], new_freq[1:]
+            if mi is not None: mi -= 1
         while new_iupac.endswith('N') and len(new_iupac) > MIN_W:
             new_iupac, new_freq = new_iupac[:-1], new_freq[:-1]
 
@@ -827,8 +902,15 @@ def refine_motifs(motifs, pos_seqs, bg):
         did_trim = False
         while len(new_iupac) > MIN_W and new_iupac[0] in "MRWSYK" and top2_sum(new_freq[0]) < TOP2:
             new_iupac, new_freq = new_iupac[1:], new_freq[1:]; did_trim = True
+            if mi is not None: mi -= 1
         while len(new_iupac) > MIN_W and new_iupac[-1] in "MRWSYK" and top2_sum(new_freq[-1]) < TOP2:
             new_iupac, new_freq = new_iupac[:-1], new_freq[:-1]; did_trim = True
+
+        # Restrict the methylated center on the refined motif (issue #52); drop
+        # the index if a trim carried it out of bounds.
+        if mi is not None and not (0 <= mi < len(new_iupac)):
+            mi = None
+        new_iupac = _constrain_center(new_iupac, mi, allowed_center_bits)
 
         # Accept refined motif only if strictly better, same-eff-shorter, or borderline-trim
         old_eff = sum(iupac_specificity(c) for c in m.iupac)
@@ -838,7 +920,7 @@ def refine_motifs(motifs, pos_seqs, bg):
                 or did_trim):
             out.append(Motif(m.idx, new_iupac, len(new_iupac),
                              m.evalue, m.pvalue, m.total_sites,
-                             np.array(new_freq) if new_freq else m.freq))
+                             np.array(new_freq) if new_freq else m.freq, mi))
         else:
             out.append(m)
     return out
@@ -917,7 +999,7 @@ def write_tsv(path, motifs, mod_type=None):
 
 # ── In-process API for MicrobeMod's call_methylation pipeline ──────────────
 def run_from_fastas(pos_path, neg_path, out_dir, output_type="xml",
-                    genome_path=None):
+                    genome_path=None, mod_type=None):
     """Read pos/neg FASTAs, find motifs, write streme.xml (or motifs.tsv).
 
     Returns the output directory if motifs were called, else None.
@@ -927,6 +1009,10 @@ def run_from_fastas(pos_path, neg_path, out_dir, output_type="xml",
     background for IUPAC consensus calls (suppresses spurious 2-letter IUPAC
     codes at positions that just track local genome bias).  Otherwise the
     background is derived from neg_seqs.
+
+    `mod_type` (modkit code 'a'/'m'/'21839'/'h' or label '6mA'/'5mC'/'4mC'/
+    '5hmC') restricts the methylated-center column to a base that can carry the
+    modification (issue #52).  None leaves the center unconstrained.
     """
     os.makedirs(out_dir, exist_ok=True)
     pos_seqs = load_fasta(pos_path)
@@ -934,7 +1020,8 @@ def run_from_fastas(pos_path, neg_path, out_dir, output_type="xml",
     if pos_seqs.shape[0] < MIN_MOTIF_SITES:
         return None
     bg = compute_genome_bg(genome_path) if genome_path else None
-    motifs = find_motifs(pos_seqs, neg_seqs, bg=bg)
+    motifs = find_motifs(pos_seqs, neg_seqs, bg=bg,
+                         allowed_center_bits=_allowed_center_bits(mod_type))
     if output_type == "xml":
         write_xml(os.path.join(out_dir, "streme.xml"), motifs,
                   pos_seqs.shape[0], neg_seqs.shape[0])
@@ -1043,7 +1130,8 @@ def subcommand_main(bed_path, fasta_path, threads=1, output_type="tsv",
                   file=sys.stderr)
             continue
         bg = compute_genome_bg(fasta_path)
-        motifs = find_motifs(pos_seqs, neg_seqs, bg=bg)
+        motifs = find_motifs(pos_seqs, neg_seqs, bg=bg,
+                             allowed_center_bits=_allowed_center_bits(code))
         any_emitted = any_emitted or bool(motifs)
         if output_type == "xml":
             xml_dir = f"{output_prefix}_{mod_label}_microbe_motif"
