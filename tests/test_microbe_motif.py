@@ -196,6 +196,42 @@ def test_find_motifs_no_signal_returns_nothing(tmp_path):
     assert motifs == []
 
 
+# ── Methylated-center constraint (issue #52) ────────────────────────────────
+def test_constrain_center_narrows_to_modifiable():
+    a_bits = mm._allowed_center_bits("a")      # A|T (6mA)
+    c_bits = mm._allowed_center_bits("m")      # C|G (5mC)
+    assert mm._constrain_center("GMCGKC", 1, a_bits) == "GACGKC"   # M -> A
+    assert mm._constrain_center("GMATTC", 1, c_bits) == "GCATTC"   # M -> C
+    assert mm._constrain_center("GACGGC", 1, a_bits) == "GACGGC"   # already A
+    assert mm._constrain_center("GMCGKC", 1, None) == "GMCGKC"     # disabled
+
+
+def test_palindromize_rejects_widening_methyl_center():
+    """#52: merging GACGGC with its RC GCCGTC gives GMCGKC (A/C at the 6mA).
+    Without a methylation type palindromize still merges; with 6mA it rejects
+    the merge and keeps the clean motif."""
+    freq = np.array([mm._iupac_pwm_row(c) for c in "GACGGC"])
+    m = mm.Motif(1, "GACGGC", 6, 1e-10, 1e-12, 100, freq, meth_index=1)
+    (loose,) = mm.palindromize([m], allowed_center_bits=None)
+    assert loose.iupac == "GMCGKC"
+    m2 = mm.Motif(1, "GACGGC", 6, 1e-10, 1e-12, 100, freq, meth_index=1)
+    (kept,) = mm.palindromize([m2], allowed_center_bits=mm._allowed_center_bits("a"))
+    assert kept.iupac == "GACGGC"
+
+
+def test_find_motifs_keeps_methyl_center_modifiable(tmp_path):
+    """#52 end-to-end: without a methylation type the caller widens the methyl
+    center (GACGGC -> GMCGKC); passing 6mA keeps that column an A."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GACGGC", seed=1)
+    pos, neg = mm.load_fasta(pos_path), mm.load_fasta(neg_path)
+    loose = [m.iupac for m in mm.find_motifs(pos, neg)]
+    typed = [m.iupac for m in mm.find_motifs(
+        pos, neg, allowed_center_bits=mm._allowed_center_bits("a"),
+        modifiable_bits=mm._modifiable_base_bits("a"))]
+    assert "GACGGC" in typed, typed          # methyl center kept as the A
+    assert "GACGGC" not in loose, loose       # untyped widens it (the bug)
+
+
 # ── Orient emitted motifs to the modified base (issue #51 comment) ──────────
 def test_orient_to_modifiable_flips_rc_emitted():
     # 6mA: modifiable base A. A motif emitted in RC orientation, with the methyl
