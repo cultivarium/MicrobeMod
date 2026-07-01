@@ -115,6 +115,35 @@ def test_assign_motifs_both_strands_nonpalindromic(tmp_path):
     assert (cov <= 1.0).all()
 
 
+def test_assign_motifs_search_strand_precedence_on_overlap(tmp_path):
+    """Issue #51 follow-up: when two motifs overlap a site — one reading it on
+    the '+' strand (forward match), the other only on the '-' strand (RC match)
+    — the '+' methyl site stays with the forward-covering motif rather than
+    being clobbered by whichever motif is parsed last."""
+    # GATTAAC occurs forward at 30-36; TTAAT occurs only via RC (ATTAA) at 31-35.
+    genome = "C" * 30 + "GATTAAC" + "C" * 30
+    assert "TTAAT" not in genome and genome[31] == "A"
+    microbemod.REF.clear()
+    microbemod.REF["c"] = Seq(genome)
+
+    motifs = [mm.Motif(1, "GATTAAC", 7, 1e-20, 1e-22, 100,
+                       np.array([mm._iupac_pwm_row(c) for c in "GATTAAC"])),
+              mm.Motif(2, "TTAAT", 5, 1e-20, 1e-22, 100,
+                       np.array([mm._iupac_pwm_row(c) for c in "TTAAT"]))]
+    mm.write_xml(str(tmp_path / "streme.xml"), motifs, 100, 1000)
+
+    df = pd.DataFrame({
+        "SNP_Position": ["c:31", "c:33"],
+        "Strand": ["+", "-"],
+        "Modification": ["a", "a"],
+        "Percent_modified": [0.95, 0.95],
+    })
+    result = assign_motifs(df, str(tmp_path))
+    assigned = dict(zip(result.SNP_Position + result.Strand, result.motif))
+    assert assigned["c:31+"] == "GATTAAC"   # '+' site: forward-covering motif wins (clobbered before)
+    assert assigned["c:33-"] == "TTAAT"      # '-' site: motif whose recognition reads on '-' there
+
+
 def test_write_to_fasta_log_names_active_caller(caplog):
     """Issue #50: the pre-caller log line names the active caller, not STREME
     (it fired on the python default path before). <10 sites so it returns

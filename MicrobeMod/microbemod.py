@@ -396,25 +396,30 @@ def assign_motifs(modkit_table, streme_output):
             motif_len = len(motif_new)
 
             # A motif occurrence physically covers both strands, so mark BOTH
-            # the + and - keys for every hit. Keying only the search strand
-            # dropped the partner-strand methylation of non-palindromic motifs
-            # into "No Motif Assigned" (issue #51). make_motif_table recomputes
-            # coverage independently from a strand-agnostic methylated set
-            # (methylated_sites is keyed by SNP_Position, no strand), so this
-            # does not change Genome_sites / Methylated_sites / coverage — only
-            # the per-site motif column and the No-Motif bin.
+            # strands for every hit — otherwise the partner-strand methylation of
+            # a non-palindromic motif was dropped into "No Motif Assigned"
+            # (issue #51). But the SEARCH-strand key takes precedence: it is
+            # written unconditionally, while the partner-strand key is only
+            # filled if unclaimed (setdefault). That way, where two different
+            # motifs overlap a site — one reading it on the '+' strand (forward
+            # match) and the other only on the '-' strand (RC match) — the site
+            # stays with the motif whose recognition actually reads on that
+            # strand, instead of being clobbered by whichever motif is parsed
+            # last. make_motif_table recomputes coverage independently from a
+            # strand-agnostic methylated set (keyed by SNP_Position, no strand),
+            # so none of this changes Genome_sites / Methylated_sites / coverage.
             for r, contig in REF.items():
-                for site in nt_search(str(contig), motif_new)[1:]:
+                for site in nt_search(str(contig), motif_new)[1:]:            # forward match
                     for i in range(site, site + motif_len):
-                        motif_sites[r + ":" + str(i) + "+"] = motif_new
-                        motif_sites[r + ":" + str(i) + "-"] = motif_new
+                        motif_sites[r + ":" + str(i) + "+"] = motif_new                # search strand
+                        motif_sites.setdefault(r + ":" + str(i) + "-", motif_new)      # partner
 
                 for site in nt_search(str(contig), Seq(motif_new).reverse_complement())[
                     1:
-                ]:
+                ]:                                                            # reverse-complement match
                     for i in range(site, site + motif_len):
-                        motif_sites[r + ":" + str(i) + "+"] = motif_new
-                        motif_sites[r + ":" + str(i) + "-"] = motif_new
+                        motif_sites[r + ":" + str(i) + "-"] = motif_new                # search strand
+                        motif_sites.setdefault(r + ":" + str(i) + "+", motif_new)      # partner
 
     modkit_table2 = modkit_table.copy()
     modkit_table2["site_strand"] = modkit_table2.SNP_Position + modkit_table2.Strand
