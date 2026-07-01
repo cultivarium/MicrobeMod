@@ -11,6 +11,7 @@ from MicrobeMod.microbemod import read_modkit
 from MicrobeMod.microbemod import write_to_fasta
 from MicrobeMod.microbemod import assign_motifs
 from MicrobeMod.microbemod import make_motif_table
+from MicrobeMod.microbemod import run_streme
 
 from pandas.testing import assert_frame_equal
 
@@ -112,3 +113,29 @@ def test_assign_motifs_both_strands_nonpalindromic(tmp_path):
         tbl[tbl.Motif != "No Motif Assigned"].Methylation_coverage,
         errors="coerce")
     assert (cov <= 1.0).all()
+
+
+def test_write_to_fasta_log_names_active_caller(caplog):
+    """Issue #50: the pre-caller log line names the active caller, not STREME
+    (it fired on the python default path before). <10 sites so it returns
+    without needing REF, but the log line still fires."""
+    df = pd.DataFrame({
+        "Percent_modified": [0.99, 0.99, 0.99],
+        "Total_coverage": [20, 20, 20],
+        "Modification": ["a", "a", "a"],
+        "Sequence": ["A" * 26] * 3,
+    })
+    with caplog.at_level("INFO"):
+        out = write_to_fasta(df, "x", "a", 0.66, 10, motif_caller="python")
+    assert out is None
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "caller: python" in msgs
+    assert "sites for STREME" not in msgs
+
+
+def test_run_streme_missing_binary_gives_clear_error():
+    """Issue #50: a missing STREME binary raises a clear message mentioning
+    STREME, not a bare exit-127 CalledProcessError."""
+    with pytest.raises(SystemExit, match="STREME"):
+        run_streme("nonexistent_pos.fasta",
+                   streme_path="microbemod_no_such_streme_binary_xyz")
