@@ -196,6 +196,41 @@ def test_find_motifs_no_signal_returns_nothing(tmp_path):
     assert motifs == []
 
 
+# ── Orient emitted motifs to the modified base (issue #51 comment) ──────────
+def test_orient_to_modifiable_flips_rc_emitted():
+    # 6mA: modifiable base A. A motif emitted in RC orientation, with the methyl
+    # position on the complement (T), is flipped so it reads as the A.
+    A = mm.IUPAC_BITS["A"]
+    freq = np.array([mm._iupac_pwm_row(c) for c in "ACCTGA"])
+    m = mm.Motif(1, "ACCTGA", 6, 1e-10, 1e-12, 100, freq, meth_index=3)  # T @3
+    (out,) = mm._orient_to_modifiable([m], A)
+    assert out.iupac == "TCAGGT"
+    assert out.meth_index == 2
+    assert out.iupac[out.meth_index] == "A"
+
+
+def test_orient_to_modifiable_leaves_modifiable_center():
+    A = mm.IUPAC_BITS["A"]
+    freq = np.array([mm._iupac_pwm_row(c) for c in "GACGGC"])
+    m = mm.Motif(1, "GACGGC", 6, 1e-10, 1e-12, 100, freq, meth_index=1)  # A @1
+    (out,) = mm._orient_to_modifiable([m], A)
+    assert out.iupac == "GACGGC"       # already shows the modified base
+    assert out.meth_index == 1
+
+
+def test_orient_to_modifiable_skips_degenerate_and_untracked():
+    A = mm.IUPAC_BITS["A"]
+    # W center (methylated on both strands) is ambiguous -> leave as-is
+    mW = mm.Motif(1, "GWTGC", 5, 1e-10, 1e-12, 100,
+                  np.array([mm._iupac_pwm_row(c) for c in "GWTGC"]), meth_index=1)
+    # no tracked methyl center -> leave as-is
+    mN = mm.Motif(2, "ACCTGA", 6, 1e-10, 1e-12, 100,
+                  np.array([mm._iupac_pwm_row(c) for c in "ACCTGA"]), meth_index=None)
+    outW, outN = mm._orient_to_modifiable([mW, mN], A)
+    assert outW.iupac == "GWTGC"
+    assert outN.iupac == "ACCTGA"
+
+
 def test_run_from_fastas_writes_streme_xml(tmp_path):
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=4)
     out_dir = tmp_path / "out"

@@ -61,6 +61,20 @@ def _allowed_center_bits(mod_type):
         return IUPAC_BITS['C'] | IUPAC_BITS['G']        # 6 (S): C or G
     return None
 
+def _modifiable_base_bits(mod_type):
+    """Single-base IUPAC bit of the base that actually carries the modification
+    (on the modified strand): A for 6mA, C for 5mC/4mC/5hmC. Used to orient an
+    emitted motif so the methylated position reads as the modified base rather
+    than its complement. None if unrecognised."""
+    if mod_type is None:
+        return None
+    m = str(mod_type).lower()
+    if m in ("a", "6ma"):
+        return IUPAC_BITS['A']
+    if m in ("m", "5mc", "21839", "4mc", "h", "5hmc"):
+        return IUPAC_BITS['C']
+    return None
+
 def _constrain_center(iupac_str, idx, allowed_bits):
     """Narrow the IUPAC code at position `idx` to `allowed_bits` (never widens).
     If the called code shares no base with allowed_bits the data disagrees that
@@ -440,15 +454,49 @@ def dedup_results(motifs, max_h):
             kept.append(m)
     return kept
 
+# ── Orient emitted motifs to the modified base ───────────────────────────────
+def _orient_to_modifiable(motifs, modifiable_bits):
+    """Reverse-complement any motif whose methylated center is *exactly* the
+    complement of the modifiable base, so the reported motif shows the modified
+    base itself (e.g. 6mA `ACCTGA` → `TCAGGT`, methyl position T→A). This is
+    orientation only — per-site assignment already searches both strands
+    (issue #51). Motifs whose center is the modifiable base, is degenerate
+    (e.g. W = methylated on both strands), or has no tracked center are left
+    unchanged."""
+    if not modifiable_bits:
+        return motifs
+    comp_bits = iupac_bits(comp_iupac(BITS_IUPAC[modifiable_bits]))
+    out = []
+    for m in motifs:
+        mi = m.meth_index
+        if (mi is not None and 0 <= mi < len(m.iupac)
+                and iupac_bits(m.iupac[mi]) == comp_bits):
+            new_iupac = revcomp_iupac(m.iupac)
+            L = len(new_iupac)
+            new_mi = L - 1 - mi
+            if m.freq is not None and len(m.freq) == L:
+                # RC the freq: reverse positions, swap A<->T and C<->G
+                new_freq = np.array([m.freq[L - 1 - i][[3, 2, 1, 0]] for i in range(L)])
+            else:
+                new_freq = m.freq
+            out.append(Motif(m.idx, new_iupac, L, m.evalue, m.pvalue,
+                             m.total_sites, new_freq, new_mi))
+        else:
+            out.append(m)
+    return out
+
 # ── Main motif finder ───────────────────────────────────────────────────────
-def find_motifs(pos_seqs, neg_seqs, bg=None, allowed_center_bits=None):
+def find_motifs(pos_seqs, neg_seqs, bg=None, allowed_center_bits=None,
+                modifiable_bits=None):
     """Iterative: find best seed → filter → extend → check for bipartite far-half →
     consensus → garbage gates → Fisher → mask matched → repeat.
 
     `allowed_center_bits` (from `_allowed_center_bits(mod_type)`) restricts the
     methylated-center column to the modifiable base or its complement so the
     caller can't emit a degenerate code at a position that can't carry the
-    modification (issue #52). None disables the constraint."""
+    modification (issue #52). `modifiable_bits` (from `_modifiable_base_bits`)
+    orients each emitted motif so the methylated position reads as the modified
+    base rather than its complement. None disables each behaviour."""
     active = pos_seqs.copy()
     results = []
     pos_total = pos_seqs.shape[0]
@@ -702,7 +750,8 @@ def find_motifs(pos_seqs, neg_seqs, bg=None, allowed_center_bits=None):
         refined = refine_motifs(refined, pos_seqs, bg, allowed_center_bits)
         if all(m.iupac == p for m, p in zip(refined, prev)): break
     palindromized = palindromize(refined, allowed_center_bits)
-    return dedup_results(palindromized, 2)
+    final = dedup_results(palindromized, 2)
+    return _orient_to_modifiable(final, modifiable_bits)
 
 def palindromize(motifs, allowed_center_bits=None):
     """Merge each motif with its RC. Accept the merge if specificity loss
@@ -1021,7 +1070,8 @@ def run_from_fastas(pos_path, neg_path, out_dir, output_type="xml",
         return None
     bg = compute_genome_bg(genome_path) if genome_path else None
     motifs = find_motifs(pos_seqs, neg_seqs, bg=bg,
-                         allowed_center_bits=_allowed_center_bits(mod_type))
+                         allowed_center_bits=_allowed_center_bits(mod_type),
+                         modifiable_bits=_modifiable_base_bits(mod_type))
     if output_type == "xml":
         write_xml(os.path.join(out_dir, "streme.xml"), motifs,
                   pos_seqs.shape[0], neg_seqs.shape[0])
@@ -1131,7 +1181,8 @@ def subcommand_main(bed_path, fasta_path, threads=1, output_type="tsv",
             continue
         bg = compute_genome_bg(fasta_path)
         motifs = find_motifs(pos_seqs, neg_seqs, bg=bg,
-                             allowed_center_bits=_allowed_center_bits(code))
+                             allowed_center_bits=_allowed_center_bits(code),
+                             modifiable_bits=_modifiable_base_bits(code))
         any_emitted = any_emitted or bool(motifs)
         if output_type == "xml":
             xml_dir = f"{output_prefix}_{mod_label}_microbe_motif"
