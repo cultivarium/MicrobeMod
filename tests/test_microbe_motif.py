@@ -205,6 +205,19 @@ def test_constrain_center_narrows_to_modifiable():
     assert mm._constrain_center("GACGGC", 1, a_bits) == "GACGGC"   # already A
     assert mm._constrain_center("GMCGKC", 1, None) == "GMCGKC"     # disabled
 
+    # every modkit code / label maps to the right allowed + modifiable base, so
+    # a typo in an alias can't silently disable #52 for a modification type.
+    W, S = mm.IUPAC_BITS["A"] | mm.IUPAC_BITS["T"], mm.IUPAC_BITS["C"] | mm.IUPAC_BITS["G"]
+    assert mm._allowed_center_bits("a") == mm._allowed_center_bits("6ma") == W
+    assert (mm._allowed_center_bits("m") == mm._allowed_center_bits("5mc")
+            == mm._allowed_center_bits("21839") == mm._allowed_center_bits("4mc")
+            == mm._allowed_center_bits("h") == mm._allowed_center_bits("5hmc") == S)
+    assert mm._allowed_center_bits("zzz") is None and mm._allowed_center_bits(None) is None
+    assert mm._modifiable_base_bits("a") == mm._modifiable_base_bits("6ma") == mm.IUPAC_BITS["A"]
+    assert (mm._modifiable_base_bits("m") == mm._modifiable_base_bits("21839")
+            == mm._modifiable_base_bits("h") == mm.IUPAC_BITS["C"])
+    assert mm._modifiable_base_bits("zzz") is None and mm._modifiable_base_bits(None) is None
+
 
 def test_palindromize_rejects_widening_methyl_center():
     """#52: merging GACGGC with its RC GCCGTC gives GMCGKC (A/C at the 6mA).
@@ -232,6 +245,77 @@ def test_find_motifs_keeps_methyl_center_modifiable(tmp_path):
     assert "GACGGC" not in loose, loose       # untyped widens it (the bug)
 
 
+def test_dedup_results_constrains_methyl_center():
+    """#52: the final dedup_results merge must not re-widen the methylated
+    center past the modifiable base (mirrors the palindromize guard — dedup is
+    the last transform before emit)."""
+    def M(s, mi):
+        return mm.Motif(1, s, len(s), 1e-10, 1e-12, 100,
+                        np.array([mm._iupac_pwm_row(c) for c in s]), meth_index=mi)
+    # merging GGGAGGG + GGGCGGG bit-unions the center (index 3) A -> M=[A/C]
+    assert mm.dedup_results([M("GGGAGGG", 3), M("GGGCGGG", 3)], 2)[0].iupac == "GGGMGGG"
+    kept = mm.dedup_results([M("GGGAGGG", 3), M("GGGCGGG", 3)], 2,
+                            mm._allowed_center_bits("a"))
+    assert kept[0].iupac == "GGGAGGG"
+    assert kept[0].iupac[kept[0].meth_index] == "A"
+
+
+def _embed_windows(fragments, n_pos=300, n_neg=4000, seed=0):
+    """Build encoded pos/neg window arrays. `fragments` = list of
+    (frag_or_list, offset); a list of fragments alternates across windows (to
+    make a column genuinely mixed). The methylated base is expected at
+    METH_CENTER by the caller, so place fragments accordingly."""
+    rng = random.Random(seed)
+    bases = "ACGT"
+
+    def arr(strs):
+        a = np.full((len(strs), mm.SEQ_LEN), 4, dtype=np.uint8)
+        for i, x in enumerate(strs):
+            a[i, : len(x)] = mm._ENC[np.frombuffer(x.encode(), np.uint8)]
+        return a
+
+    pos = []
+    for k in range(n_pos):
+        s = [rng.choice(bases) for _ in range(mm.SEQ_LEN)]
+        for frag, off in fragments:
+            f = frag[k % len(frag)] if isinstance(frag, list) else frag
+            s[off : off + len(f)] = list(f)
+        pos.append("".join(s))
+    neg = ["".join(rng.choice(bases) for _ in range(mm.SEQ_LEN)) for _ in range(n_neg)]
+    return arr(pos), arr(neg)
+
+
+def _call_typed(pos, neg):
+    return mm.find_motifs(
+        pos, neg, bg=mm.compute_bg_from_seqs(neg),
+        allowed_center_bits=mm._allowed_center_bits("a"),
+        modifiable_bits=mm._modifiable_base_bits("a"))
+
+
+def test_find_motifs_bipartite_meth_center_tracked():
+    """#52: meth_index is tracked correctly through the BIPARTITE consensus
+    (close half + N spacer + far half) — the every other find_motifs test uses
+    short contiguous motifs, so the far/close/spacer win_pos math is otherwise
+    unexercised. The constraint must land on the methyl-A in the close half."""
+    pos, neg = _embed_windows([("TGACC", 11), ("GGTT", 21)], seed=0)  # methyl-A at 13
+    bip = [m for m in _call_typed(pos, neg) if "N" in m.iupac.strip("N")]
+    assert bip, [m.iupac for m in _call_typed(pos, neg)]
+    m = bip[0]
+    assert m.iupac == "TGACCNNNNNGGTT"
+    assert m.meth_index == 2 and m.iupac[m.meth_index] == "A"
+
+
+def test_find_motifs_narrows_mixed_center():
+    """#52: a genuinely mixed methyl center (A in half the windows, C in the
+    other -> consensus M) is narrowed to the modifiable base for 6mA; untyped
+    keeps the degenerate M (confirms the column is really mixed)."""
+    pos, neg = _embed_windows([(["GACGGC", "GCCGGC"], 12)], seed=0)  # index1 -> pos 13
+    typed = [m.iupac for m in _call_typed(pos, neg)]
+    untyped = [m.iupac for m in mm.find_motifs(pos, neg, bg=mm.compute_bg_from_seqs(neg))]
+    assert "GACGGC" in typed and not any("M" in u for u in typed), typed
+    assert "GACGGC" not in untyped and any("M" in u for u in untyped), untyped
+
+
 # ── Orient emitted motifs to the modified base (issue #51 comment) ──────────
 def test_orient_to_modifiable_flips_rc_emitted():
     # 6mA: modifiable base A. A motif emitted in RC orientation, with the methyl
@@ -243,6 +327,13 @@ def test_orient_to_modifiable_flips_rc_emitted():
     assert out.iupac == "TCAGGT"
     assert out.meth_index == 2
     assert out.iupac[out.meth_index] == "A"
+    # the freq array is RC'd too (reverse + A<->T, C<->G swap) so the emitted
+    # PWM stays consistent with the flipped IUPAC (write_xml derives from IUPAC,
+    # but keep freq correct for any consumer / round-trip)
+    L = len(m.freq)
+    expected = np.array([m.freq[L - 1 - i][[3, 2, 1, 0]] for i in range(L)])
+    assert np.allclose(out.freq, expected)
+    assert "".join("ACGT"[r.argmax()] for r in out.freq) == "TCAGGT"
 
 
 def test_orient_to_modifiable_leaves_modifiable_center():
@@ -267,6 +358,19 @@ def test_orient_to_modifiable_skips_degenerate_and_untracked():
     assert outN.iupac == "ACCTGA"
 
 
+def test_find_motifs_orients_center_end_to_end():
+    """#52 orientation wiring: find_motifs re-orients an emitted motif whose
+    methyl center would read as the complement (T) so it reads as the modified
+    base (A). This embed reads T at the center, so the caller emits ACCTGA
+    (center T) natively and _orient_to_modifiable flips it to TCAGGT (center A);
+    without that wiring the emitted motif keeps the T center."""
+    pos, neg = _embed_windows([("ACCTGA", 10)], seed=0)  # center reads T at METH_CENTER
+    iupacs = [m.iupac for m in _call_typed(pos, neg)]
+    assert "TCAGGT" in iupacs and "ACCTGA" not in iupacs, iupacs
+    m = next(m for m in _call_typed(pos, neg) if m.iupac == "TCAGGT")
+    assert m.iupac[m.meth_index] == "A"
+
+
 def test_run_from_fastas_writes_streme_xml(tmp_path):
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=4)
     out_dir = tmp_path / "out"
@@ -279,3 +383,22 @@ def test_run_from_fastas_writes_streme_xml(tmp_path):
     root = ET.parse(xml_path).getroot()
     ids = [m.get("id") for m in root.find("motifs").findall("motif")]
     assert any("GATC" in i for i in ids), ids
+
+
+def test_run_from_fastas_applies_methylation_type(tmp_path):
+    """#52 plumbing through the production entry point: run_from_fastas with a
+    methylation type constrains the emitted center (GACGGC, not GMCGKC), and
+    without it the degenerate center persists."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GACGGC", seed=5)
+
+    def emitted(mod_type):
+        out_dir = tmp_path / ("out_" + (mod_type or "none"))
+        mm.run_from_fastas(pos_path, neg_path, str(out_dir),
+                           output_type="xml", mod_type=mod_type)
+        root = ET.parse(os.path.join(str(out_dir), "streme.xml")).getroot()
+        return [m.get("id") for m in root.find("motifs").findall("motif")]
+
+    typed, untyped = emitted("a"), emitted(None)
+    assert any("GACGGC" in i for i in typed), typed
+    assert not any("GMCGKC" in i for i in typed), typed
+    assert any("GMCGKC" in i for i in untyped), untyped   # confirms the case is live

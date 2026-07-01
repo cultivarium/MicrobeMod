@@ -407,14 +407,20 @@ class Motif:
         self.meth_index = meth_index
 
 # ── Dedup ───────────────────────────────────────────────────────────────────
-def dedup_results(motifs, max_h):
+def dedup_results(motifs, max_h, allowed_center_bits=None):
     """Drop or merge near-duplicate motifs.
     Two paths:
       1) Same length, IUPAC-Lev=1: merge to bit-union (with specific-overlap
          + identical-specific-overlap floors + ≥0.5 support ratio).
       2) motifs_alignable (lev<=max_h fwd or rc): drop the later motif.
          For RC-aligned same-length pairs differing at one position, broaden
-         the kept motif's IUPAC at that position toward the bit-union."""
+         the kept motif's IUPAC at that position toward the bit-union.
+
+    `allowed_center_bits` keeps the methylated center within the modifiable base
+    or its complement here too (issue #52), mirroring `palindromize`: both merge
+    paths widen `iupac` and this is the last transform before emit, so without
+    this a widened center could escape the constraint. A no-op on well-formed
+    windows (whose center is already within the allowed set)."""
     kept = []
     for m in motifs:
         handled = False
@@ -428,7 +434,8 @@ def dedup_results(motifs, max_h):
                 if (specific_overlap(ac, kc) >= so_floor
                         and n_identical_specific(ac, kc) >= id_floor
                         and hi > 0 and lo / hi >= 0.5):
-                    kept[i].iupac = merge_iupac(ac, kc)
+                    kept[i].iupac = _constrain_center(
+                        merge_iupac(ac, kc), kept[i].meth_index, allowed_center_bits)
                     kept[i].total_sites = hi
                     handled = True
                     break
@@ -447,7 +454,8 @@ def dedup_results(motifs, max_h):
                             if (_is_specific(cur_bits) and (var_bits & ~cur_bits)):
                                 lst = list(kc)
                                 lst[kept_pos] = BITS_IUPAC.get(cur_bits | var_bits, 'N')
-                                kept[i].iupac = "".join(lst)
+                                kept[i].iupac = _constrain_center(
+                                    "".join(lst), kept[i].meth_index, allowed_center_bits)
                 handled = True
                 break
         if not handled:
@@ -744,13 +752,14 @@ def find_motifs(pos_seqs, neg_seqs, bg=None, allowed_center_bits=None,
         bg = compute_bg_from_seqs(neg_seqs)
 
     # ── Post-loop: dedup + iterated refinement → palindromize → final dedup ──
-    refined = refine_motifs(dedup_results(results, 2), pos_seqs, bg, allowed_center_bits)
+    refined = refine_motifs(dedup_results(results, 2, allowed_center_bits),
+                            pos_seqs, bg, allowed_center_bits)
     for _ in range(2):
         prev = [m.iupac for m in refined]
         refined = refine_motifs(refined, pos_seqs, bg, allowed_center_bits)
         if all(m.iupac == p for m, p in zip(refined, prev)): break
     palindromized = palindromize(refined, allowed_center_bits)
-    final = dedup_results(palindromized, 2)
+    final = dedup_results(palindromized, 2, allowed_center_bits)
     return _orient_to_modifiable(final, modifiable_bits)
 
 def palindromize(motifs, allowed_center_bits=None):
