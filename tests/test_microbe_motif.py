@@ -10,6 +10,7 @@ directly.
 import math
 import os
 import random
+import sys
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -402,3 +403,109 @@ def test_run_from_fastas_applies_methylation_type(tmp_path):
     assert any("GACGGC" in i for i in typed), typed
     assert not any("GMCGKC" in i for i in typed), typed
     assert any("GMCGKC" in i for i in untyped), untyped   # confirms the case is live
+
+
+# ── refine_motifs meth_index shift, in isolation (issue #52) ────────────────
+def test_refine_motifs_tracks_meth_center_through_left_prepend():
+    """#52: refine_motifs carries the methyl-center index through a flank edit.
+
+    Every other #52 test drives the center constraint through the full
+    find_motifs → palindromize → dedup stack, all of which re-apply the center
+    constraint — so a wrong +1/-1 shift *inside* refine_motifs is masked. Here we
+    call refine_motifs directly: the input core "TGATM" has its methyl center at
+    index 4 (the mixed A/C column); refine re-derives it, prepends a consensus
+    "C" left flank (shifting the center to index 5) and extends "GG" on the
+    right. The 6mA constraint must then land on the *shifted* column: typed
+    narrows M->A at index 5 (CTGATAGG), untyped keeps M (CTGATMGG). If the +1
+    left-prepend shift were dropped, the constraint would fall on index 4 (a
+    fixed 'T', a no-op) and the M center would survive typed."""
+    ENC = {"A": 0, "C": 1, "G": 2, "T": 3}
+    n = 300
+    pos = np.full((n, mm.SEQ_LEN), ENC["G"], dtype=np.uint8)   # 'G' filler
+    for i in range(n):
+        pos[i, 7] = i % 4                                       # uniform -> N (blocks 2nd prepend)
+        pos[i, 8] = ENC["C"]                                    # consensus C -> left prepend (+1)
+        pos[i, 9], pos[i, 10], pos[i, 11], pos[i, 12] = ENC["T"], ENC["G"], ENC["A"], ENC["T"]
+        pos[i, 13] = ENC["A"] if i % 2 == 0 else ENC["C"]       # mixed -> M at METH_CENTER
+    bg = np.array([0.25, 0.25, 0.25, 0.25])
+    core = mm.Motif(1, "TGATM", 5, 1e-10, 1e-12, 100,
+                    np.array([mm._iupac_pwm_row(c) for c in "TGATM"]), meth_index=4)
+
+    untyped = mm.refine_motifs([core], pos, bg, allowed_center_bits=None)[0]
+    assert untyped.iupac == "CTGATMGG" and untyped.meth_index == 5
+    assert untyped.iupac[untyped.meth_index] == "M"            # center un-narrowed
+
+    typed = mm.refine_motifs([core], pos, bg,
+                             allowed_center_bits=mm._allowed_center_bits("a"))[0]
+    assert typed.iupac == "CTGATAGG" and typed.meth_index == 5
+    assert typed.iupac[typed.meth_index] == "A"                # narrowed on the shifted column
+
+
+# ── subcommand + CLI plumbing (issues #52 / #50) ────────────────────────────
+def _write_bed_and_fasta(tmp_path, motif="GACGGC", meth_off=1, code="a", n=40):
+    """Synthetic reference + 18-column modkit bedmethyl with `n` methylated
+    sites (one per embedded motif occurrence). Returns (bed_path, fasta_path)."""
+    gap, start0 = 25, 50
+    length = start0 + n * gap + 50
+    genome = list("G" * length)
+    positions = []
+    for i in range(n):
+        ms = start0 + i * gap
+        genome[ms:ms + len(motif)] = list(motif)
+        positions.append(ms + meth_off)                         # methylated base
+    fasta = tmp_path / "ref.fasta"
+    fasta.write_text(">contig1\n" + "".join(genome) + "\n")
+    bed = tmp_path / "calls.bed"
+    with open(bed, "w") as f:
+        for p in positions:
+            cols = ["contig1", str(p), str(p + 1), code, "1000", "+",
+                    str(p), str(p + 1), "255,0,0", "20", "90.0", "18",
+                    "2", "0", "0", "0", "0", "0"]          # 18 cols; cov=20, frac=90%
+            f.write("\t".join(cols) + "\n")
+    return str(bed), str(fasta)
+
+
+def test_subcommand_main_threads_methylation_constraint(tmp_path, monkeypatch):
+    """#52 plumbing through the stand-alone subcommand: subcommand_main must
+    pass the methylation type's center constraint (allowed_center_bits +
+    modifiable_bits) into find_motifs. Capture the call rather than the emit so
+    the assertion pins the plumbing itself; a dropped kwarg would capture None."""
+    bed, fasta = _write_bed_and_fasta(tmp_path)
+    captured = {}
+
+    def fake_find_motifs(pos_seqs, neg_seqs, bg=None,
+                         allowed_center_bits=None, modifiable_bits=None):
+        captured["n_pos"] = int(pos_seqs.shape[0])
+        captured["allowed"] = allowed_center_bits
+        captured["modifiable"] = modifiable_bits
+        return []
+
+    monkeypatch.setattr(mm, "find_motifs", fake_find_motifs)
+    monkeypatch.chdir(tmp_path)
+    mm.subcommand_main(bed, fasta, output_type="tsv",
+                       output_prefix="probe", methylation_types="6mA")
+
+    assert captured.get("n_pos", 0) >= mm.MIN_MOTIF_SITES     # find_motifs actually reached
+    assert captured["allowed"] == mm._allowed_center_bits("a")
+    assert captured["modifiable"] == mm._modifiable_base_bits("a")
+    assert (tmp_path / "probe_motifs.tsv").exists()
+
+
+def test_main_cli_parses_args_and_writes_xml(tmp_path):
+    """#50 plumbing: the stand-alone main() CLI parses -p/--n/-o, runs the
+    caller, and writes streme.xml with the recovered motif."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=1)
+    out_dir = tmp_path / "cli_out"
+    old_argv = sys.argv
+    sys.argv = ["motif_caller.py", ".", "-p", pos_path, "--n", neg_path,
+                "-o", str(out_dir)]
+    try:
+        mm.main()
+    finally:
+        sys.argv = old_argv
+
+    xml_path = out_dir / "streme.xml"
+    assert xml_path.exists()
+    root = ET.parse(str(xml_path)).getroot()
+    ids = [m.get("id") for m in root.find("motifs").findall("motif")]
+    assert any("GATC" in i for i in ids), ids
