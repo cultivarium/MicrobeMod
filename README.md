@@ -316,32 +316,53 @@ Description of columns:
 ## MicrobeMod call_methylation: all parameters
 
 ```
-usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA [-m METHYLATION_TYPES] [-o OUTPUT_PREFIX] [-s STREME_PATH] [--min_strand_coverage MIN_STRAND_COVERAGE]
-                                   [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD] [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
-                                   [--percent_cutoff_streme PERCENT_CUTOFF_STREME] [-t THREADS]
+usage: MicrobeMod call_methylation [-h] -b BAM_FILE -r REFERENCE_FASTA
+                                   [-m METHYLATION_TYPES] [-o OUTPUT_PREFIX]
+                                   [-d OUTPUT_DIRECTORY] [-s STREME_PATH]
+                                   [--motif_caller {python,streme}]
+                                   [--min_strand_coverage MIN_STRAND_COVERAGE]
+                                   [--methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD]
+                                   [--percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF]
+                                   [--percent_cutoff_streme PERCENT_CUTOFF_STREME]
+                                   [-t THREADS]
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
-  -b BAM_FILE, --bam_file BAM_FILE
-                        BAM file of nanopore reads mapped to reference genome with the MM and ML tags preserved.
-  -r REFERENCE_FASTA, --reference_fasta REFERENCE_FASTA
+  -b, --bam_file BAM_FILE
+                        BAM file of nanopore reads mapped to reference genome
+                        with the MM and ML tags preserved.
+  -r, --reference_fasta REFERENCE_FASTA
                         Reference genome FASTA file.
-  -m METHYLATION_TYPES, --methylation_types METHYLATION_TYPES
-                        Methylation types to profile
-  -o OUTPUT_PREFIX, --output_prefix OUTPUT_PREFIX
+  -m, --methylation_types METHYLATION_TYPES
+                        Methylation types to profile - a comma separated list.
+                        Default: 6mA,5mC,4mC,5hmC
+  -o, --output_prefix OUTPUT_PREFIX
                         Output prefix. Default is based on the BAM filename.
-  -s STREME_PATH, --streme_path STREME_PATH
-                        Path to streme executable.
+  -d, --output_directory OUTPUT_DIRECTORY
+                        Output directory.
+  -s, --streme_path STREME_PATH
+                        Path to streme executable (only used when
+                        --motif_caller streme).
+  --motif_caller {python,streme}
+                        Motif-calling engine: 'python' (built-in
+                        microbe_motif, background-corrected; default) or
+                        'streme' (legacy MEME-suite STREME).
   --min_strand_coverage MIN_STRAND_COVERAGE
-                        Minimum coverage required to call a site as methylated. Note this is per strand (so half of total coverage). Default: 10x
+                        Minimum coverage required to call a site as
+                        methylated. Note this is per strand (so half of total
+                        coverage). Default: 10x
   --methylation_confidence_threshold METHYLATION_CONFIDENCE_THRESHOLD
-                        The minimum confidence score to call a base on a read as methylated. Passed to modkit. Default: 0.66
+                        The minimum confidence score to call a base on a read
+                        as methylated. Passed to modkit. Default: 0.66
   --percent_methylation_cutoff PERCENT_METHYLATION_CUTOFF
-                        The fraction of methylated reads mapping to a site to count that site as methylated. Default: 0.66
+                        The fraction of methylated reads mapping to a site to
+                        count that site as methylated. Default: 0.66
   --percent_cutoff_streme PERCENT_CUTOFF_STREME
-                        The fraction of methylated reads mapping to a site to pass that site to motif calling. Default: 0.9
-  -t THREADS, --threads THREADS
-                        Number of threads to use. Only the first step (modkit) is multithreaded.
+                        The fraction of methylated reads mapping to a site to
+                        pass that site to motif calling. Default: 0.9
+  -t, --threads THREADS
+                        Number of threads to use. Only the first step (modkit)
+                        is multithreaded.
 ```
 
 ## MicrobeMod annotate_rm: all parameters

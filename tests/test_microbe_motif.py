@@ -10,6 +10,7 @@ directly.
 import math
 import os
 import random
+import sys
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -196,6 +197,181 @@ def test_find_motifs_no_signal_returns_nothing(tmp_path):
     assert motifs == []
 
 
+# ── Methylated-center constraint (issue #52) ────────────────────────────────
+def test_constrain_center_narrows_to_modifiable():
+    a_bits = mm._allowed_center_bits("a")      # A|T (6mA)
+    c_bits = mm._allowed_center_bits("m")      # C|G (5mC)
+    assert mm._constrain_center("GMCGKC", 1, a_bits) == "GACGKC"   # M -> A
+    assert mm._constrain_center("GMATTC", 1, c_bits) == "GCATTC"   # M -> C
+    assert mm._constrain_center("GACGGC", 1, a_bits) == "GACGGC"   # already A
+    assert mm._constrain_center("GMCGKC", 1, None) == "GMCGKC"     # disabled
+
+    # every modkit code / label maps to the right allowed + modifiable base, so
+    # a typo in an alias can't silently disable #52 for a modification type.
+    W, S = mm.IUPAC_BITS["A"] | mm.IUPAC_BITS["T"], mm.IUPAC_BITS["C"] | mm.IUPAC_BITS["G"]
+    assert mm._allowed_center_bits("a") == mm._allowed_center_bits("6ma") == W
+    assert (mm._allowed_center_bits("m") == mm._allowed_center_bits("5mc")
+            == mm._allowed_center_bits("21839") == mm._allowed_center_bits("4mc")
+            == mm._allowed_center_bits("h") == mm._allowed_center_bits("5hmc") == S)
+    assert mm._allowed_center_bits("zzz") is None and mm._allowed_center_bits(None) is None
+    assert mm._modifiable_base_bits("a") == mm._modifiable_base_bits("6ma") == mm.IUPAC_BITS["A"]
+    assert (mm._modifiable_base_bits("m") == mm._modifiable_base_bits("21839")
+            == mm._modifiable_base_bits("h") == mm.IUPAC_BITS["C"])
+    assert mm._modifiable_base_bits("zzz") is None and mm._modifiable_base_bits(None) is None
+
+
+def test_palindromize_rejects_widening_methyl_center():
+    """#52: merging GACGGC with its RC GCCGTC gives GMCGKC (A/C at the 6mA).
+    Without a methylation type palindromize still merges; with 6mA it rejects
+    the merge and keeps the clean motif."""
+    freq = np.array([mm._iupac_pwm_row(c) for c in "GACGGC"])
+    m = mm.Motif(1, "GACGGC", 6, 1e-10, 1e-12, 100, freq, meth_index=1)
+    (loose,) = mm.palindromize([m], allowed_center_bits=None)
+    assert loose.iupac == "GMCGKC"
+    m2 = mm.Motif(1, "GACGGC", 6, 1e-10, 1e-12, 100, freq, meth_index=1)
+    (kept,) = mm.palindromize([m2], allowed_center_bits=mm._allowed_center_bits("a"))
+    assert kept.iupac == "GACGGC"
+
+
+def test_find_motifs_keeps_methyl_center_modifiable(tmp_path):
+    """#52 end-to-end: without a methylation type the caller widens the methyl
+    center (GACGGC -> GMCGKC); passing 6mA keeps that column an A."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GACGGC", seed=1)
+    pos, neg = mm.load_fasta(pos_path), mm.load_fasta(neg_path)
+    loose = [m.iupac for m in mm.find_motifs(pos, neg)]
+    typed = [m.iupac for m in mm.find_motifs(
+        pos, neg, allowed_center_bits=mm._allowed_center_bits("a"),
+        modifiable_bits=mm._modifiable_base_bits("a"))]
+    assert "GACGGC" in typed, typed          # methyl center kept as the A
+    assert "GACGGC" not in loose, loose       # untyped widens it (the bug)
+
+
+def test_dedup_results_constrains_methyl_center():
+    """#52: the final dedup_results merge must not re-widen the methylated
+    center past the modifiable base (mirrors the palindromize guard — dedup is
+    the last transform before emit)."""
+    def M(s, mi):
+        return mm.Motif(1, s, len(s), 1e-10, 1e-12, 100,
+                        np.array([mm._iupac_pwm_row(c) for c in s]), meth_index=mi)
+    # merging GGGAGGG + GGGCGGG bit-unions the center (index 3) A -> M=[A/C]
+    assert mm.dedup_results([M("GGGAGGG", 3), M("GGGCGGG", 3)], 2)[0].iupac == "GGGMGGG"
+    kept = mm.dedup_results([M("GGGAGGG", 3), M("GGGCGGG", 3)], 2,
+                            mm._allowed_center_bits("a"))
+    assert kept[0].iupac == "GGGAGGG"
+    assert kept[0].iupac[kept[0].meth_index] == "A"
+
+
+def _embed_windows(fragments, n_pos=300, n_neg=4000, seed=0):
+    """Build encoded pos/neg window arrays. `fragments` = list of
+    (frag_or_list, offset); a list of fragments alternates across windows (to
+    make a column genuinely mixed). The methylated base is expected at
+    METH_CENTER by the caller, so place fragments accordingly."""
+    rng = random.Random(seed)
+    bases = "ACGT"
+
+    def arr(strs):
+        a = np.full((len(strs), mm.SEQ_LEN), 4, dtype=np.uint8)
+        for i, x in enumerate(strs):
+            a[i, : len(x)] = mm._ENC[np.frombuffer(x.encode(), np.uint8)]
+        return a
+
+    pos = []
+    for k in range(n_pos):
+        s = [rng.choice(bases) for _ in range(mm.SEQ_LEN)]
+        for frag, off in fragments:
+            f = frag[k % len(frag)] if isinstance(frag, list) else frag
+            s[off : off + len(f)] = list(f)
+        pos.append("".join(s))
+    neg = ["".join(rng.choice(bases) for _ in range(mm.SEQ_LEN)) for _ in range(n_neg)]
+    return arr(pos), arr(neg)
+
+
+def _call_typed(pos, neg):
+    return mm.find_motifs(
+        pos, neg, bg=mm.compute_bg_from_seqs(neg),
+        allowed_center_bits=mm._allowed_center_bits("a"),
+        modifiable_bits=mm._modifiable_base_bits("a"))
+
+
+def test_find_motifs_bipartite_meth_center_tracked():
+    """#52: meth_index is tracked correctly through the BIPARTITE consensus
+    (close half + N spacer + far half) — the every other find_motifs test uses
+    short contiguous motifs, so the far/close/spacer win_pos math is otherwise
+    unexercised. The constraint must land on the methyl-A in the close half."""
+    pos, neg = _embed_windows([("TGACC", 11), ("GGTT", 21)], seed=0)  # methyl-A at 13
+    bip = [m for m in _call_typed(pos, neg) if "N" in m.iupac.strip("N")]
+    assert bip, [m.iupac for m in _call_typed(pos, neg)]
+    m = bip[0]
+    assert m.iupac == "TGACCNNNNNGGTT"
+    assert m.meth_index == 2 and m.iupac[m.meth_index] == "A"
+
+
+def test_find_motifs_narrows_mixed_center():
+    """#52: a genuinely mixed methyl center (A in half the windows, C in the
+    other -> consensus M) is narrowed to the modifiable base for 6mA; untyped
+    keeps the degenerate M (confirms the column is really mixed)."""
+    pos, neg = _embed_windows([(["GACGGC", "GCCGGC"], 12)], seed=0)  # index1 -> pos 13
+    typed = [m.iupac for m in _call_typed(pos, neg)]
+    untyped = [m.iupac for m in mm.find_motifs(pos, neg, bg=mm.compute_bg_from_seqs(neg))]
+    assert "GACGGC" in typed and not any("M" in u for u in typed), typed
+    assert "GACGGC" not in untyped and any("M" in u for u in untyped), untyped
+
+
+# ── Orient emitted motifs to the modified base (issue #51 comment) ──────────
+def test_orient_to_modifiable_flips_rc_emitted():
+    # 6mA: modifiable base A. A motif emitted in RC orientation, with the methyl
+    # position on the complement (T), is flipped so it reads as the A.
+    A = mm.IUPAC_BITS["A"]
+    freq = np.array([mm._iupac_pwm_row(c) for c in "ACCTGA"])
+    m = mm.Motif(1, "ACCTGA", 6, 1e-10, 1e-12, 100, freq, meth_index=3)  # T @3
+    (out,) = mm._orient_to_modifiable([m], A)
+    assert out.iupac == "TCAGGT"
+    assert out.meth_index == 2
+    assert out.iupac[out.meth_index] == "A"
+    # the freq array is RC'd too (reverse + A<->T, C<->G swap) so the emitted
+    # PWM stays consistent with the flipped IUPAC (write_xml derives from IUPAC,
+    # but keep freq correct for any consumer / round-trip)
+    L = len(m.freq)
+    expected = np.array([m.freq[L - 1 - i][[3, 2, 1, 0]] for i in range(L)])
+    assert np.allclose(out.freq, expected)
+    assert "".join("ACGT"[r.argmax()] for r in out.freq) == "TCAGGT"
+
+
+def test_orient_to_modifiable_leaves_modifiable_center():
+    A = mm.IUPAC_BITS["A"]
+    freq = np.array([mm._iupac_pwm_row(c) for c in "GACGGC"])
+    m = mm.Motif(1, "GACGGC", 6, 1e-10, 1e-12, 100, freq, meth_index=1)  # A @1
+    (out,) = mm._orient_to_modifiable([m], A)
+    assert out.iupac == "GACGGC"       # already shows the modified base
+    assert out.meth_index == 1
+
+
+def test_orient_to_modifiable_skips_degenerate_and_untracked():
+    A = mm.IUPAC_BITS["A"]
+    # W center (methylated on both strands) is ambiguous -> leave as-is
+    mW = mm.Motif(1, "GWTGC", 5, 1e-10, 1e-12, 100,
+                  np.array([mm._iupac_pwm_row(c) for c in "GWTGC"]), meth_index=1)
+    # no tracked methyl center -> leave as-is
+    mN = mm.Motif(2, "ACCTGA", 6, 1e-10, 1e-12, 100,
+                  np.array([mm._iupac_pwm_row(c) for c in "ACCTGA"]), meth_index=None)
+    outW, outN = mm._orient_to_modifiable([mW, mN], A)
+    assert outW.iupac == "GWTGC"
+    assert outN.iupac == "ACCTGA"
+
+
+def test_find_motifs_orients_center_end_to_end():
+    """#52 orientation wiring: find_motifs re-orients an emitted motif whose
+    methyl center would read as the complement (T) so it reads as the modified
+    base (A). This embed reads T at the center, so the caller emits ACCTGA
+    (center T) natively and _orient_to_modifiable flips it to TCAGGT (center A);
+    without that wiring the emitted motif keeps the T center."""
+    pos, neg = _embed_windows([("ACCTGA", 10)], seed=0)  # center reads T at METH_CENTER
+    iupacs = [m.iupac for m in _call_typed(pos, neg)]
+    assert "TCAGGT" in iupacs and "ACCTGA" not in iupacs, iupacs
+    m = next(m for m in _call_typed(pos, neg) if m.iupac == "TCAGGT")
+    assert m.iupac[m.meth_index] == "A"
+
+
 def test_run_from_fastas_writes_streme_xml(tmp_path):
     pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=4)
     out_dir = tmp_path / "out"
@@ -206,5 +382,130 @@ def test_run_from_fastas_writes_streme_xml(tmp_path):
     xml_path = os.path.join(str(out_dir), "streme.xml")
     assert os.path.isfile(xml_path)
     root = ET.parse(xml_path).getroot()
+    ids = [m.get("id") for m in root.find("motifs").findall("motif")]
+    assert any("GATC" in i for i in ids), ids
+
+
+def test_run_from_fastas_applies_methylation_type(tmp_path):
+    """#52 plumbing through the production entry point: run_from_fastas with a
+    methylation type constrains the emitted center (GACGGC, not GMCGKC), and
+    without it the degenerate center persists."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GACGGC", seed=5)
+
+    def emitted(mod_type):
+        out_dir = tmp_path / ("out_" + (mod_type or "none"))
+        mm.run_from_fastas(pos_path, neg_path, str(out_dir),
+                           output_type="xml", mod_type=mod_type)
+        root = ET.parse(os.path.join(str(out_dir), "streme.xml")).getroot()
+        return [m.get("id") for m in root.find("motifs").findall("motif")]
+
+    typed, untyped = emitted("a"), emitted(None)
+    assert any("GACGGC" in i for i in typed), typed
+    assert not any("GMCGKC" in i for i in typed), typed
+    assert any("GMCGKC" in i for i in untyped), untyped   # confirms the case is live
+
+
+# ── refine_motifs meth_index shift, in isolation (issue #52) ────────────────
+def test_refine_motifs_tracks_meth_center_through_left_prepend():
+    """#52: refine_motifs carries the methyl-center index through a flank edit.
+
+    Every other #52 test drives the center constraint through the full
+    find_motifs → palindromize → dedup stack, all of which re-apply the center
+    constraint — so a wrong +1/-1 shift *inside* refine_motifs is masked. Here we
+    call refine_motifs directly: the input core "TGATM" has its methyl center at
+    index 4 (the mixed A/C column); refine re-derives it, prepends a consensus
+    "C" left flank (shifting the center to index 5) and extends "GG" on the
+    right. The 6mA constraint must then land on the *shifted* column: typed
+    narrows M->A at index 5 (CTGATAGG), untyped keeps M (CTGATMGG). If the +1
+    left-prepend shift were dropped, the constraint would fall on index 4 (a
+    fixed 'T', a no-op) and the M center would survive typed."""
+    ENC = {"A": 0, "C": 1, "G": 2, "T": 3}
+    n = 300
+    pos = np.full((n, mm.SEQ_LEN), ENC["G"], dtype=np.uint8)   # 'G' filler
+    for i in range(n):
+        pos[i, 7] = i % 4                                       # uniform -> N (blocks 2nd prepend)
+        pos[i, 8] = ENC["C"]                                    # consensus C -> left prepend (+1)
+        pos[i, 9], pos[i, 10], pos[i, 11], pos[i, 12] = ENC["T"], ENC["G"], ENC["A"], ENC["T"]
+        pos[i, 13] = ENC["A"] if i % 2 == 0 else ENC["C"]       # mixed -> M at METH_CENTER
+    bg = np.array([0.25, 0.25, 0.25, 0.25])
+    core = mm.Motif(1, "TGATM", 5, 1e-10, 1e-12, 100,
+                    np.array([mm._iupac_pwm_row(c) for c in "TGATM"]), meth_index=4)
+
+    untyped = mm.refine_motifs([core], pos, bg, allowed_center_bits=None)[0]
+    assert untyped.iupac == "CTGATMGG" and untyped.meth_index == 5
+    assert untyped.iupac[untyped.meth_index] == "M"            # center un-narrowed
+
+    typed = mm.refine_motifs([core], pos, bg,
+                             allowed_center_bits=mm._allowed_center_bits("a"))[0]
+    assert typed.iupac == "CTGATAGG" and typed.meth_index == 5
+    assert typed.iupac[typed.meth_index] == "A"                # narrowed on the shifted column
+
+
+# ── subcommand + CLI plumbing (issues #52 / #50) ────────────────────────────
+def _write_bed_and_fasta(tmp_path, motif="GACGGC", meth_off=1, code="a", n=40):
+    """Synthetic reference + 18-column modkit bedmethyl with `n` methylated
+    sites (one per embedded motif occurrence). Returns (bed_path, fasta_path)."""
+    gap, start0 = 25, 50
+    length = start0 + n * gap + 50
+    genome = list("G" * length)
+    positions = []
+    for i in range(n):
+        ms = start0 + i * gap
+        genome[ms:ms + len(motif)] = list(motif)
+        positions.append(ms + meth_off)                         # methylated base
+    fasta = tmp_path / "ref.fasta"
+    fasta.write_text(">contig1\n" + "".join(genome) + "\n")
+    bed = tmp_path / "calls.bed"
+    with open(bed, "w") as f:
+        for p in positions:
+            cols = ["contig1", str(p), str(p + 1), code, "1000", "+",
+                    str(p), str(p + 1), "255,0,0", "20", "90.0", "18",
+                    "2", "0", "0", "0", "0", "0"]          # 18 cols; cov=20, frac=90%
+            f.write("\t".join(cols) + "\n")
+    return str(bed), str(fasta)
+
+
+def test_subcommand_main_threads_methylation_constraint(tmp_path, monkeypatch):
+    """#52 plumbing through the stand-alone subcommand: subcommand_main must
+    pass the methylation type's center constraint (allowed_center_bits +
+    modifiable_bits) into find_motifs. Capture the call rather than the emit so
+    the assertion pins the plumbing itself; a dropped kwarg would capture None."""
+    bed, fasta = _write_bed_and_fasta(tmp_path)
+    captured = {}
+
+    def fake_find_motifs(pos_seqs, neg_seqs, bg=None,
+                         allowed_center_bits=None, modifiable_bits=None):
+        captured["n_pos"] = int(pos_seqs.shape[0])
+        captured["allowed"] = allowed_center_bits
+        captured["modifiable"] = modifiable_bits
+        return []
+
+    monkeypatch.setattr(mm, "find_motifs", fake_find_motifs)
+    monkeypatch.chdir(tmp_path)
+    mm.subcommand_main(bed, fasta, output_type="tsv",
+                       output_prefix="probe", methylation_types="6mA")
+
+    assert captured.get("n_pos", 0) >= mm.MIN_MOTIF_SITES     # find_motifs actually reached
+    assert captured["allowed"] == mm._allowed_center_bits("a")
+    assert captured["modifiable"] == mm._modifiable_base_bits("a")
+    assert (tmp_path / "probe_motifs.tsv").exists()
+
+
+def test_main_cli_parses_args_and_writes_xml(tmp_path):
+    """#50 plumbing: the stand-alone main() CLI parses -p/--n/-o, runs the
+    caller, and writes streme.xml with the recovered motif."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GATC", seed=1)
+    out_dir = tmp_path / "cli_out"
+    old_argv = sys.argv
+    sys.argv = ["motif_caller.py", ".", "-p", pos_path, "--n", neg_path,
+                "-o", str(out_dir)]
+    try:
+        mm.main()
+    finally:
+        sys.argv = old_argv
+
+    xml_path = out_dir / "streme.xml"
+    assert xml_path.exists()
+    root = ET.parse(str(xml_path)).getroot()
     ids = [m.get("id") for m in root.find("motifs").findall("motif")]
     assert any("GATC" in i for i in ids), ids

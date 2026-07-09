@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -210,7 +211,8 @@ def read_modkit(low_modkit_output, min_coverage=10):
 
 
 def write_to_fasta(
-    modkit_table, prefix, mod_type, percent_cutoff, min_coverage, subsample=1
+    modkit_table, prefix, mod_type, percent_cutoff, min_coverage, subsample=1,
+    motif_caller="python",
 ):
     """Write kmers of length WINDOW_SIZE around methylated positions in reference genome REF.
     Args:
@@ -220,6 +222,7 @@ def write_to_fasta(
         percent_cutoff: The cutoff of % of reads that has to be methylated to be written out.
         min_coverage: Minimum coverage of a site required to write that site to the output.
         subsample: optional parameter, the portion of sites to randomly subsample down.
+        motif_caller: the active motif caller ("python" or "streme"), for the log line only.
     Returns:
         fn_name: file name of the FASTA file created.
     """
@@ -233,8 +236,9 @@ def write_to_fasta(
         modkit_table = modkit_table.sample(int(modkit_table.shape[0] * subsample))
 
     logging.info(
-        "%s sites for STREME with cutoff %s and min coverage %s",
+        "%s sites for motif calling (caller: %s) with cutoff %s and min coverage %s",
         modkit_table.shape[0],
+        motif_caller,
         percent_cutoff,
         min_coverage,
     )
@@ -285,6 +289,16 @@ def run_streme(kmer_file, streme_path="streme"):
     Returns:
         output_dir: path to output directory of STREME
     """
+
+    # STREME is optional since #49 (python is the default caller). Fail with a
+    # clear message instead of a bare exit-127 CalledProcessError when the user
+    # asks for --motif_caller streme without the MEME suite installed.
+    if shutil.which(streme_path) is None:
+        raise SystemExit(
+            "Error: STREME executable '%s' not found on PATH. Install the MEME "
+            "suite (which provides STREME), or use --motif_caller python (the "
+            "default)." % streme_path
+        )
 
     ## Run STREME
     output_dir = kmer_file.split(".fasta")[0] + "_streme"
@@ -381,16 +395,31 @@ def assign_motifs(modkit_table, streme_output):
             ## Find motif occurrences in reference
             motif_len = len(motif_new)
 
+            # A motif occurrence physically covers both strands, so mark BOTH
+            # strands for every hit — otherwise the partner-strand methylation of
+            # a non-palindromic motif was dropped into "No Motif Assigned"
+            # (issue #51). But the SEARCH-strand key takes precedence: it is
+            # written unconditionally, while the partner-strand key is only
+            # filled if unclaimed (setdefault). That way, where two different
+            # motifs overlap a site — one reading it on the '+' strand (forward
+            # match) and the other only on the '-' strand (RC match) — the site
+            # stays with the motif whose recognition actually reads on that
+            # strand, instead of being clobbered by whichever motif is parsed
+            # last. make_motif_table recomputes coverage independently from a
+            # strand-agnostic methylated set (keyed by SNP_Position, no strand),
+            # so none of this changes Genome_sites / Methylated_sites / coverage.
             for r, contig in REF.items():
-                for site in nt_search(str(contig), motif_new)[1:]:
+                for site in nt_search(str(contig), motif_new)[1:]:            # forward match
                     for i in range(site, site + motif_len):
-                        motif_sites[r + ":" + str(i) + "+"] = motif_new
+                        motif_sites[r + ":" + str(i) + "+"] = motif_new                # search strand
+                        motif_sites.setdefault(r + ":" + str(i) + "-", motif_new)      # partner
 
                 for site in nt_search(str(contig), Seq(motif_new).reverse_complement())[
                     1:
-                ]:
+                ]:                                                            # reverse-complement match
                     for i in range(site, site + motif_len):
-                        motif_sites[r + ":" + str(i) + "-"] = motif_new
+                        motif_sites[r + ":" + str(i) + "-"] = motif_new                # search strand
+                        motif_sites.setdefault(r + ":" + str(i) + "+", motif_new)      # partner
 
     modkit_table2 = modkit_table.copy()
     modkit_table2["site_strand"] = modkit_table2.SNP_Position + modkit_table2.Strand
@@ -596,6 +625,7 @@ def main(
             methylation,
             percent_cutoff_streme,
             min_coverage,
+            motif_caller=motif_caller,
         )
         # Call motifs with the selected engine. Both write a STREME-format
         # streme.xml that assign_motifs() parses, so downstream is identical.
@@ -608,6 +638,7 @@ def main(
                     out_dir,
                     output_type="xml",
                     genome_path=reference_fasta,
+                    mod_type=methylation,
                 )
             else:
                 streme_out = run_streme(pos_fasta, streme_path)
