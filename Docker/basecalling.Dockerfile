@@ -21,13 +21,8 @@ RUN useradd -ms /bin/bash ubuntu
 USER ubuntu
 
 WORKDIR /home/ubuntu
-RUN wget https://cdn.oxfordnanoportal.com/software/analysis/dorado-0.4.1-linux-x64.tar.gz
-RUN tar -xvf dorado-0.4.1-linux-x64.tar.gz
-
-RUN ./dorado-0.4.1-linux-x64/bin/dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0
-RUN ./dorado-0.4.1-linux-x64/bin/dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0_5mC@v2
-RUN ./dorado-0.4.1-linux-x64/bin/dorado download --model dna_r10.4.1_e8.2_400bps_sup@v4.2.0_6mA@v3
-
+RUN wget https://cdn.oxfordnanoportal.com/software/analysis/dorado-2.0.0-linux-x64.tar.gz
+RUN tar -xvf dorado-2.0.0-linux-x64.tar.gz
 
 COPY --chown=ubuntu:ubuntu ./run_dorado.sh ./run_dorado.sh
 RUN chmod +x /home/ubuntu/run_dorado.sh
