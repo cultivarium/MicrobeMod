@@ -12,6 +12,10 @@ while getopts "h?agl:" OPT; do
     echo "-a: pass AWS credentials specified as environment variables to the aws command"
     echo "-g: use GPU"
     echo "-l: library name"
+    echo "Environment variables:"
+    echo "BUCKET_LOCATION: S3 path with the input pod5 files (required)"
+    echo "DORADO_MODEL: dorado model complex (default: sup)"
+    echo "DORADO_ARGS: dorado basecaller flags after the reads input (default: --recursive --modified-bases 4mC_5mC 6mA)"
     exit 0
     ;;
   a)
@@ -25,6 +29,9 @@ while getopts "h?agl:" OPT; do
     ;;
   esac
 done
+
+: "${DORADO_MODEL:=sup}"
+: "${DORADO_ARGS:=--recursive --modified-bases 4mC_5mC 6mA}"
 
 if [[ -z $BUCKET_LOCATION ]]; then
   echo "Please provide a bucket location"
@@ -49,10 +56,10 @@ aws s3 cp --recursive $BUCKET_LOCATION $library_name
  
 if [[ $use_gpu == 1 ]]; then
   echo "Using GPU"
-  /home/ubuntu/dorado-0.4.1-linux-x64/bin/dorado basecaller /home/ubuntu/dna_r10.4.1_e8.2_400bps_sup@v4.2.0 $library_name --emit-moves --modified-bases-models /home/ubuntu/dna_r10.4.1_e8.2_400bps_sup@v4.2.0_5mC@v2,/home/ubuntu/dna_r10.4.1_e8.2_400bps_sup@v4.2.0_6mA@v3 > $library_name.d3.bam
+  /home/ubuntu/dorado-2.0.0-linux-x64/bin/dorado basecaller $DORADO_MODEL $library_name $DORADO_ARGS > $library_name.d3.bam
 else
   echo "Using CPU"
-  /home/ubuntu/dorado-0.4.1-linux-x64/bin/dorado basecaller -x cpu --emit-moves /home/ubuntu/dna_r10.4.1_e8.2_400bps_sup@v4.2.0 $library_name  > $library_name.d3.bam
+  /home/ubuntu/dorado-2.0.0-linux-x64/bin/dorado basecaller -x cpu $DORADO_MODEL $library_name $DORADO_ARGS > $library_name.d3.bam
 fi
 
 aws s3 cp $library_name.d3.bam $BUCKET_LOCATION
