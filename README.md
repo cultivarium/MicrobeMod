@@ -84,7 +84,7 @@ Download the database (required for `annotate_rm` only - includes HMMs from [Def
 python download_db.py
 ```
 
-*Update 2026*: FigShare is blocking programmatic URL downloads, so you'll have to setup the database directory. 
+If the script can't download the database (e.g. FigShare rejects the request), you can set up the database directory manually.
 
 Download this file: https://figshare.com/ndownloader/files/55209713
 

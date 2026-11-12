@@ -9,7 +9,8 @@ from pathlib import Path
 
 URL = "https://ndownloader.figshare.com/files/55209713"
 DB_TARBALL = Path("db.tar.gz")
-USER_AGENT = "Mozilla/5.0"
+# FigShare's bot protection 403s bare browser-like strings such as "Mozilla/5.0".
+USER_AGENT = "MicrobeMod-download-db"
 MAX_ATTEMPTS = 30
 RETRY_WAIT_SECONDS = 20
 DOWNLOAD_TIMEOUT_SECONDS = 60
@@ -29,6 +30,10 @@ def download_database():
                 print(f"Database downloaded (attempt {attempt}).")
                 return
             reason = "response was not a valid tarball (FigShare may be staging the file)"
+        except urllib.error.HTTPError as err:
+            if 400 <= err.code < 500 and err.code != 429:
+                sys.exit(f"ERROR: FigShare returned HTTP {err.code} {err.reason} for {URL}.")
+            reason = str(err)
         except (urllib.error.URLError, http.client.HTTPException, OSError) as err:
             reason = str(err)
         if attempt < MAX_ATTEMPTS:
