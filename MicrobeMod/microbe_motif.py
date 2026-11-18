@@ -758,11 +758,31 @@ def find_motifs(pos_seqs, neg_seqs, bg=None, allowed_center_bits=None,
         prev = [m.iupac for m in refined]
         refined = refine_motifs(refined, pos_seqs, bg, allowed_center_bits)
         if all(m.iupac == p for m, p in zip(refined, prev)): break
-    palindromized = palindromize(refined, allowed_center_bits)
+    palindromized = palindromize(refined, allowed_center_bits, pos_seqs, neg_seqs)
     final = dedup_results(palindromized, 2, allowed_center_bits)
     return _orient_to_modifiable(final, modifiable_bits)
 
-def palindromize(motifs, allowed_center_bits=None):
+def _rc_observed_at_center(m, pos_seqs, neg_seqs):
+    """True if the RC motif is enriched in the positives at the same offset
+    from METH_CENTER as m's methylated base. A genuine degenerate palindrome
+    (CCTGG + CCAGG, both centred on the modified C) passes; an asymmetric
+    motif whose RC is only the opposite-strand read at another offset
+    (CAAATG -> CATTTG) does not (issue #57)."""
+    if m.meth_index is None or neg_seqs is None:
+        return True
+    start = METH_CENTER - m.meth_index
+    rc = revcomp_iupac(m.iupac)
+    if start < 0 or start + len(rc) > pos_seqs.shape[1]:
+        return False
+    bits = iupac_to_bits_array(rc)
+    pos_n = int(matches_at_mask(pos_seqs, bits, start).sum())
+    if pos_n < MIN_MOTIF_SITES:
+        return False
+    neg_rate = (int(matches_at_mask(neg_seqs, bits, start).sum()) / neg_seqs.shape[0]
+                if neg_seqs.shape[0] else 0.0)
+    return (pos_n / pos_seqs.shape[0]) / max(neg_rate, ENRICH_NEG_FLOOR) >= MIN_ENRICH_RATIO
+
+def palindromize(motifs, allowed_center_bits=None, pos_seqs=None, neg_seqs=None):
     """Merge each motif with its RC. Accept the merge if specificity loss
     <= 1.0 bit (catches palindromic R-M motifs reported as one strand,
     e.g. CCTGG → CCWGG; rejects non-palindromic motifs like GAGNNNNNGGG
@@ -773,11 +793,18 @@ def palindromize(motifs, allowed_center_bits=None):
     signals the motif isn't palindromic at the methylated position — e.g.
     GACGGC, whose merge with its RC GCCGTC gives GMCGKC and puts A/C at the
     methyl-A. Palindromes (GATC) short-circuit above; near-palindromes whose
-    methyl center is unchanged by the merge (CCTGG→CCWGG) are unaffected."""
+    methyl center is unchanged by the merge (CCTGG→CCWGG) are unaffected.
+
+    With `pos_seqs`/`neg_seqs`, a merge is also skipped unless the RC is
+    actually observed, enriched, at the same center offset: an asymmetric
+    motif whose RC only appears as the opposite-strand read at a different
+    offset (CAAATG → CATTTG) stays CAAATG (issue #57)."""
     out = []
     for m in motifs:
         rc_str = revcomp_iupac(m.iupac)
         if rc_str == m.iupac:
+            out.append(m); continue
+        if pos_seqs is not None and not _rc_observed_at_center(m, pos_seqs, neg_seqs):
             out.append(m); continue
         merged = merge_iupac(m.iupac, rc_str)
         mi = m.meth_index
