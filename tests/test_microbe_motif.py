@@ -133,10 +133,12 @@ def test_write_xml_roundtrip(tmp_path):
 # ── End-to-end synthetic recovery ───────────────────────────────────────────
 def _embed_motif_fastas(tmp_path, motif, n_pos=200, n_neg=3000, seed=0):
     """Write pos/neg FASTAs: positives carry `motif` centered on METH_CENTER,
-    negatives are uniform random. Returns (pos_path, neg_path)."""
+    negatives are uniform random. Returns (pos_path, neg_path). A list of
+    equal-length motifs alternates across windows at the same offset."""
     rng = random.Random(seed)
     bases = "ACGT"
-    half = len(motif) // 2
+    motifs = motif if isinstance(motif, list) else [motif]
+    half = len(motifs[0]) // 2
     lo = mm.METH_CENTER - half  # place motif so its middle sits on the center
 
     def rand_seq():
@@ -146,7 +148,8 @@ def _embed_motif_fastas(tmp_path, motif, n_pos=200, n_neg=3000, seed=0):
     with open(pos_path, "w") as f:
         for i in range(n_pos):
             s = rand_seq()
-            s[lo : lo + len(motif)] = list(motif)
+            frag = motifs[i % len(motifs)]
+            s[lo : lo + len(frag)] = list(frag)
             f.write(">{}\n{}\n".format(i, "".join(s)))
 
     neg_path = tmp_path / "neg.fasta"
@@ -234,18 +237,18 @@ def test_palindromize_rejects_widening_methyl_center():
 
 
 def test_find_motifs_keeps_methyl_center_modifiable(tmp_path):
-    """#52 end-to-end: the caller keeps GACGGC's methyl center an A. The RC
-    merge is rejected with and without a methylation type because the RC is
-    not observed at the same center offset (#57)."""
-    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GACGGC", seed=1)
+    """#52 end-to-end: without a methylation type the caller widens the methyl
+    center (GACGGC -> GMCGKC); passing 6mA keeps it. The RC is planted at the
+    same offset so the RC data gate allows the merge and the center check
+    decides."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, ["GACGGC", "GCCGTC"], seed=1)
     pos, neg = mm.load_fasta(pos_path), mm.load_fasta(neg_path)
     loose = [m.iupac for m in mm.find_motifs(pos, neg)]
     typed = [m.iupac for m in mm.find_motifs(
         pos, neg, allowed_center_bits=mm._allowed_center_bits("a"),
         modifiable_bits=mm._modifiable_base_bits("a"))]
     assert "GACGGC" in typed, typed          # methyl center kept as the A
-    assert "GACGGC" in loose, loose           # the data gate also rejects it
-    assert "GMCGKC" not in loose, loose
+    assert "GACGGC" not in loose, loose       # untyped widens it
 
 
 def test_dedup_results_constrains_methyl_center():
@@ -332,6 +335,32 @@ def test_find_motifs_merges_same_offset_rc_variants():
         allowed_center_bits=mm._allowed_center_bits("m"),
         modifiable_bits=mm._modifiable_base_bits("m"))
     assert "CCWGG" in [m.iupac for m in motifs], [m.iupac for m in motifs]
+
+
+def _motif(s, meth_index):
+    return mm.Motif(1, s, len(s), 1e-10, 1e-12, 100,
+                    np.array([mm._iupac_pwm_row(c) for c in s]), meth_index=meth_index)
+
+
+@pytest.mark.parametrize("meth_index", [2, None])
+def test_palindromize_data_gate(meth_index):
+    """palindromize merges only when the RC is enriched at the motif's own
+    offset, with or without a tracked methyl center."""
+    same_pos, neg = _embed_pairs([("CCTGG", 11), ("CCAGG", 11)])
+    mirrored_pos, _ = _embed_pairs([("CCTGG", 11), ("CCAGG", 12)])
+    (merged,) = mm.palindromize([_motif("CCTGG", meth_index)], None, same_pos, neg)
+    assert merged.iupac == "CCWGG"
+    (kept,) = mm.palindromize([_motif("CCTGG", meth_index)], None, mirrored_pos, neg)
+    assert kept.iupac == "CCTGG"
+
+
+def test_palindromize_data_gate_needs_enough_rc_sites():
+    """An RC seen at the right offset in fewer than MIN_MOTIF_SITES windows
+    is not enough evidence to merge."""
+    pairs = [("CCTGG", 11)] * 99 + [("CCAGG", 11)]
+    pos, neg = _embed_pairs(pairs, n_pos=400)
+    (kept,) = mm.palindromize([_motif("CCTGG", 2)], None, pos, neg)
+    assert kept.iupac == "CCTGG"
 
 
 def test_find_motifs_bipartite_meth_center_tracked():
@@ -428,10 +457,11 @@ def test_run_from_fastas_writes_streme_xml(tmp_path):
 
 
 def test_run_from_fastas_applies_methylation_type(tmp_path):
-    """#52 plumbing through the production entry point: run_from_fastas
-    constrains the emitted center to GACGGC, with or without a methylation
-    type, because the RC merge is not data-supported (#57)."""
-    pos_path, neg_path = _embed_motif_fastas(tmp_path, "GACGGC", seed=5)
+    """#52 plumbing through the production entry point: run_from_fastas with a
+    methylation type constrains the emitted center (GACGGC, not GMCGKC), and
+    without it the degenerate center persists. The RC is planted at the same
+    offset so the RC data gate allows the merge."""
+    pos_path, neg_path = _embed_motif_fastas(tmp_path, ["GACGGC", "GCCGTC"], seed=5)
 
     def emitted(mod_type):
         out_dir = tmp_path / ("out_" + (mod_type or "none"))
@@ -443,8 +473,7 @@ def test_run_from_fastas_applies_methylation_type(tmp_path):
     typed, untyped = emitted("a"), emitted(None)
     assert any("GACGGC" in i for i in typed), typed
     assert not any("GMCGKC" in i for i in typed), typed
-    assert any("GACGGC" in i for i in untyped), untyped
-    assert not any("GMCGKC" in i for i in untyped), untyped
+    assert any("GMCGKC" in i for i in untyped), untyped
 
 
 # ── refine_motifs meth_index shift, in isolation (issue #52) ────────────────
