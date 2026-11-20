@@ -323,7 +323,13 @@ or 2 passes).
 `palindromize` — after refine, each motif is merged with its reverse complement
 when the merge costs ≤ 1.0 bit of specificity (catches palindromic R-M motifs
 reported as one strand, e.g. `CCTGG` → `CCWGG`; rejects non-palindromic motifs
-where the merge would collapse to junk). A final `dedup_results` pass follows.
+where the merge would collapse to junk). The merge also needs data support:
+the RC motif must be enriched in the positives at the same window offset as the
+motif itself (aligned to its methylated base, or to its most common centered
+start when the center isn't tracked). That separates a degenerate palindrome
+(`CCTGG` + `CCAGG`, both centered on the modified C) from an asymmetric motif
+whose RC is only the opposite-strand read at a mirrored offset (`CAAATG` +
+`CATTTG`, kept as `CAAATG`). A final `dedup_results` pass follows.
 The motif set returned here is what gets written to XML — there is no further
 set-level optimization step.
 
